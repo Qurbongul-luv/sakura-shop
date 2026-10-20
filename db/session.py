@@ -12,9 +12,14 @@ elif db_url.startswith("postgres://"):
 elif db_url.startswith("postgresql://") and not db_url.startswith("postgresql+asyncpg://"):
     db_url = db_url.replace("postgresql://", "postgresql+asyncpg://")
 
-# Handle SSL parameter for asyncpg (e.g. Neon.tech, Supabase, Render Postgres)
-if "postgresql" in db_url and "sslmode=require" in db_url:
-    db_url = db_url.replace("sslmode=require", "ssl=require")
+# Handle SSL parameter and Neon pooling for asyncpg
+if "postgresql" in db_url:
+    if "sslmode=require" in db_url:
+        db_url = db_url.replace("sslmode=require", "ssl=require")
+    # Neon direct connection optimization
+    if "neon.tech" in db_url:
+        db_url = db_url.replace("-pooler.", ".")
+        db_url = db_url.replace("&channel_binding=require", "").replace("channel_binding=require&", "").replace("channel_binding=require", "")
 
 engine = create_async_engine(
     db_url,
