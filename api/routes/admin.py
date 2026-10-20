@@ -193,6 +193,7 @@ async def admin_create_category(
 @router.delete("/categories/{slug}", response_model=Dict[str, Any])
 async def admin_delete_category(
     slug: str,
+    force: bool = Query(False),
     admin: TelegramUser = Depends(require_admin),
     db: AsyncSession = Depends(get_db),
 ):
@@ -205,15 +206,18 @@ async def admin_delete_category(
     # Check if products exist in category
     prod_check = await db.execute(select(func.count(Product.id)).where(Product.category == clean_slug))
     count = prod_check.scalar() or 0
-    if count > 0:
+    if count > 0 and not force:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Kategoriyada {count} ta mahsulot bor. Avval ularni o'chiring yoki boshqa bo'limga ko'chiring."
+            detail=f"Kategoriyada {count} ta mahsulot bor. O'chirish uchun 'force' parametrini yuboring yoki mahsulotlarni o'chiring."
         )
+
+    if count > 0 and force:
+        await db.execute(delete(Product).where(Product.category == clean_slug))
 
     await db.delete(cat)
     await db.commit()
-    return {"success": True, "deleted_slug": clean_slug}
+    return {"success": True, "deleted_slug": clean_slug, "deleted_products_count": count if force else 0}
 
 
 # ==================== ORDERS ====================

@@ -196,6 +196,28 @@ export const App: React.FC = () => {
     }
   };
 
+  const refreshCategories = async () => {
+    try {
+      const catResp = await fetch('/api/categories');
+      if (catResp.ok) {
+        setCategories(await catResp.json());
+      }
+    } catch (e) {
+      console.error(e);
+    }
+  };
+
+  const refreshReviews = async () => {
+    try {
+      const revResp = await fetch('/api/reviews');
+      if (revResp.ok) {
+        setReviews(await revResp.json());
+      }
+    } catch (e) {
+      console.error(e);
+    }
+  };
+
   const handleToggleWishlist = async (productId: number) => {
     if (!initData) {
       // Offline/demo fallback toggle
@@ -475,6 +497,8 @@ export const App: React.FC = () => {
                 categories={categories}
                 initData={initData}
                 onRefreshProducts={refreshProducts}
+                onRefreshCategories={refreshCategories}
+                onRefreshReviews={refreshReviews}
                 t={t}
               />
             )}

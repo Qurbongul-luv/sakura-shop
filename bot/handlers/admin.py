@@ -48,6 +48,11 @@ class ProductWizard(StatesGroup):
 
 
 # FSM States for Add Admin & Broadcast
+class CategoryWizard(StatesGroup):
+    waiting_for_name = State()
+    waiting_for_emoji = State()
+
+
 class AdminSettingsState(StatesGroup):
     waiting_for_admin_forward = State()
     waiting_for_broadcast_text = State()
@@ -759,6 +764,266 @@ async def process_new_admin_forward(message: Message, state: FSMContext):
 
     await state.clear()
     await message.answer("👑 Admin menyusi:", reply_markup=get_admin_main_keyboard())
+
+
+# ==================== CATEGORIES MANAGEMENT ====================
+@router.callback_query(F.data == "admin_categories")
+async def handle_admin_categories_list(callback: CallbackQuery, state: FSMContext = None):
+    if state:
+        await state.clear()
+    async with async_session_factory() as session:
+        res = await session.execute(select(Category).order_by(Category.sort_order))
+        categories = res.scalars().all()
+
+        cat_counts = {}
+        for c in categories:
+            prod_c = await session.execute(select(func.count(Product.id)).where(Product.category == c.slug))
+            cat_counts[c.slug] = prod_c.scalar() or 0
+
+    buttons = []
+    for c in categories:
+        count = cat_counts.get(c.slug, 0)
+        buttons.append([
+            InlineKeyboardButton(
+                text=f"{c.emoji} #{c.name} ({count} ta)",
+                callback_data=f"admin_manage_cat_{c.slug}",
+            )
+        ])
+
+    buttons.append([InlineKeyboardButton(text="➕ Yangi bo'lim qo'shish", callback_data="admin_add_cat")])
+    buttons.append([InlineKeyboardButton(text="⬅️ Orqaga", callback_data="admin_menu")])
+
+    text = (
+        "🗂 <b>Do'kon bo'limlari (kategoriyalar):</b> 🌸\n\n"
+        "O'chirish yoki ma'lumotlarini ko'rish uchun bo'lim ustiga bosing, yoki yangi bo'lim qo'shing:"
+    )
+    await callback.message.edit_text(text, reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons))
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("admin_manage_cat_"))
+async def handle_manage_single_category(callback: CallbackQuery):
+    slug = callback.data.replace("admin_manage_cat_", "").strip()
+    async with async_session_factory() as session:
+        res = await session.execute(select(Category).where(Category.slug == slug))
+        cat = res.scalars().first()
+        prod_c = await session.execute(select(func.count(Product.id)).where(Product.category == slug))
+        count = prod_c.scalar() or 0
+
+    if not cat:
+        await callback.answer("Bo'lim topilmadi", show_alert=True)
+        return
+
+    text = (
+        f"🗂 <b>Bo'lim tafsilotlari:</b>\n\n"
+        f"🏷 Nomi: <b>{escape(cat.name)}</b>\n"
+        f"🌸 Belgisi: {cat.emoji}\n"
+        f"🔑 Slug: <code>#{cat.slug}</code>\n"
+        f"📦 Mahsulotlar soni: <b>{count} ta</b>\n\n"
+        f"Ushbu bo'limni o'chirishni xohlaysizmi?"
+    )
+
+    markup = InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(
+                    text="🗑️ Bo'limni o'chirish",
+                    callback_data=f"admin_del_cat_{cat.slug}",
+                )
+            ],
+            [InlineKeyboardButton(text="⬅️ Bo'limlar ro'yxatiga", callback_data="admin_categories")],
+        ]
+    )
+    await callback.message.edit_text(text, reply_markup=markup)
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("admin_del_cat_"))
+async def handle_delete_category(callback: CallbackQuery):
+    slug = callback.data.replace("admin_del_cat_", "").strip()
+    async with async_session_factory() as session:
+        res = await session.execute(select(Category).where(Category.slug == slug))
+        cat = res.scalars().first()
+        if cat:
+            await session.execute(delete(Product).where(Product.category == slug))
+            await session.delete(cat)
+            await session.commit()
+
+    await callback.answer("🗑️ Bo'lim va undagi mahsulotlar o'chirildi!", show_alert=True)
+    await handle_admin_categories_list(callback, None)
+
+
+@router.callback_query(F.data == "admin_add_cat")
+async def handle_start_add_category(callback: CallbackQuery, state: FSMContext):
+    await state.set_state(CategoryWizard.waiting_for_name)
+    await callback.message.answer(
+        "➕ <b>Yangi bo'lim qo'shish:</b>\n\n"
+        "Yangi bo'lim nomini yozing (masalan: <i>Sumkalar</i>, <i>Koylaklar</i> yoki <i>Aksessuarlar</i>):",
+        reply_markup=ReplyKeyboardMarkup(
+            keyboard=[[KeyboardButton(text="❌ Bekor qilish")]],
+            resize_keyboard=True,
+        )
+    )
+    await callback.answer()
+
+
+@router.message(CategoryWizard.waiting_for_name)
+async def process_cat_name(message: Message, state: FSMContext):
+    name = (message.text or "").strip()
+    if not name or name == "❌ Bekor qilish":
+        await state.clear()
+        await message.answer("❌ Bekor qilindi.", reply_markup=get_main_reply_keyboard())
+        await message.answer("👑 Admin menyusi:", reply_markup=get_admin_main_keyboard())
+        return
+
+    clean_slug = re.sub(r'[^a-zA-Z0-9а-яА-ЯёЁ_]', '-', name.lower()).strip('-')
+    await state.update_data(cat_name=name, cat_slug=clean_slug)
+    await state.set_state(CategoryWizard.waiting_for_emoji)
+    await message.answer(
+        f"🌸 Bo'lim nomi: <b>{escape(name)}</b>\n\n"
+        "Endi ushbu bo'lim uchun bitta mos <b>emoji</b> yuboring (masalan: 👜, 👗, 💍, 🎀 yoki 🌸):"
+    )
+
+
+@router.message(CategoryWizard.waiting_for_emoji)
+async def process_cat_emoji(message: Message, state: FSMContext):
+    emoji_char = (message.text or "").strip()
+    if not emoji_char or emoji_char == "❌ Bekor qilish":
+        await state.clear()
+        await message.answer("❌ Bekor qilindi.", reply_markup=get_main_reply_keyboard())
+        await message.answer("👑 Admin menyusi:", reply_markup=get_admin_main_keyboard())
+        return
+
+    data = await state.get_data()
+    name = data.get("cat_name", "Kategoriya")
+    slug = data.get("cat_slug", "kategoriya")
+
+    async with async_session_factory() as session:
+        existing = await session.execute(select(Category).where(Category.slug == slug))
+        if existing.scalars().first():
+            slug = f"{slug}-{int(datetime.now().timestamp()) % 1000}"
+
+        new_cat = Category(
+            slug=slug,
+            name=name,
+            emoji=emoji_char[:4],
+            sort_order=10,
+        )
+        session.add(new_cat)
+        await session.commit()
+
+    await state.clear()
+    await message.answer(
+        f"✅ <b>{emoji_char} {escape(name)}</b> bo'limi muvaffaqiyatli qo'shildi! 🌸",
+        reply_markup=get_main_reply_keyboard(),
+    )
+    await message.answer("👑 Admin menyusi:", reply_markup=get_admin_main_keyboard())
+
+
+# ==================== REVIEWS MANAGEMENT ====================
+@router.callback_query(F.data == "admin_reviews")
+async def handle_admin_reviews_list(callback: CallbackQuery):
+    async with async_session_factory() as session:
+        res = await session.execute(select(Review).order_by(desc(Review.created_at)).limit(10))
+        reviews = res.scalars().all()
+
+    if not reviews:
+        await callback.message.edit_text(
+            "⭐ <b>Mijozlar fikrlari:</b>\n\nHozircha birorta ham fikr yo'q.",
+            reply_markup=InlineKeyboardMarkup(
+                inline_keyboard=[[InlineKeyboardButton(text="⬅️ Orqaga", callback_data="admin_menu")]]
+            )
+        )
+        await callback.answer()
+        return
+
+    buttons = []
+    for r in reviews:
+        status_icon = "✅" if r.approved else "⏳"
+        author = r.customer_name or "Mijoz"
+        text_snippet = (r.text or "")[:20]
+        buttons.append([
+            InlineKeyboardButton(
+                text=f"{status_icon} {author}: \"{text_snippet}...\"",
+                callback_data=f"admin_manage_review_{r.id}",
+            )
+        ])
+    buttons.append([InlineKeyboardButton(text="⬅️ Orqaga", callback_data="admin_menu")])
+
+    await callback.message.edit_text(
+        "⭐ <b>Mijozlar fikrlari (oxirgi 10 ta):</b>\nO'chirish yoki tasdiqlash uchun fikrni tanlang:",
+        reply_markup=InlineKeyboardMarkup(inline_keyboard=buttons),
+    )
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("admin_manage_review_"))
+async def handle_manage_single_review(callback: CallbackQuery):
+    rev_id = int(callback.data.replace("admin_manage_review_", ""))
+    async with async_session_factory() as session:
+        res = await session.execute(select(Review).where(Review.id == rev_id))
+        r = res.scalars().first()
+
+    if not r:
+        await callback.answer("Fikr topilmadi", show_alert=True)
+        return
+
+    status_str = "Tasdiqlangan (Ko'rinmoqda) ✅" if r.approved else "Kutilmoqda ⏳"
+    text = (
+        f"⭐ <b>Mijoz fikri:</b>\n\n"
+        f"👤 Muallif: <b>{escape(str(r.customer_name or 'Mijoz'))}</b>\n"
+        f"📊 Holati: <b>{status_str}</b>\n\n"
+        f"💬 Matn:\n<i>\"{escape(str(r.text or ''))}\"</i>"
+    )
+
+    toggle_btn_text = "🚫 Yashirish" if r.approved else "✅ Tasdiqlash (e'lon qilish)"
+    markup = InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(
+                    text=toggle_btn_text,
+                    callback_data=f"admin_toggle_rev_{r.id}",
+                )
+            ],
+            [
+                InlineKeyboardButton(
+                    text="🗑️ Fikrni o'chirish",
+                    callback_data=f"admin_del_rev_{r.id}",
+                )
+            ],
+            [InlineKeyboardButton(text="⬅️ Fikrlar ro'yxatiga", callback_data="admin_reviews")],
+        ]
+    )
+    await callback.message.edit_text(text, reply_markup=markup)
+    await callback.answer()
+
+
+@router.callback_query(F.data.startswith("admin_toggle_rev_"))
+async def handle_toggle_review_approval(callback: CallbackQuery):
+    rev_id = int(callback.data.replace("admin_toggle_rev_", ""))
+    async with async_session_factory() as session:
+        res = await session.execute(select(Review).where(Review.id == rev_id))
+        r = res.scalars().first()
+        if r:
+            r.approved = not r.approved
+            await session.commit()
+
+    await callback.answer("Holat yangilandi", show_alert=True)
+    await handle_manage_single_review(callback)
+
+
+@router.callback_query(F.data.startswith("admin_del_rev_"))
+async def handle_delete_single_review(callback: CallbackQuery):
+    rev_id = int(callback.data.replace("admin_del_rev_", ""))
+    async with async_session_factory() as session:
+        res = await session.execute(select(Review).where(Review.id == rev_id))
+        r = res.scalars().first()
+        if r:
+            await session.delete(r)
+            await session.commit()
+
+    await callback.answer("🗑️ Fikr o'chirildi!", show_alert=True)
+    await handle_admin_reviews_list(callback)
 
 
 @router.callback_query(F.data == "admin_menu")

@@ -24,8 +24,10 @@ import {
   Ban,
   Check,
   Calendar,
+  Folder,
+  Star,
 } from 'lucide-react';
-import { Product, Category, Order, AdminStats, Contest, LeaderboardEntry, SuspiciousUserItem } from '../types';
+import { Product, Category, Order, Review, AdminStats, Contest, LeaderboardEntry, SuspiciousUserItem } from '../types';
 import { formatPrice, getMediaUrl } from '../utils/format';
 import { haptic } from '../utils/telegram';
 import { Translations } from '../i18n';
@@ -35,6 +37,8 @@ interface AdminPageProps {
   categories: Category[];
   initData: string;
   onRefreshProducts: () => void;
+  onRefreshCategories?: () => void;
+  onRefreshReviews?: () => void;
   t: Translations;
 }
 
@@ -43,9 +47,22 @@ export const AdminPage: React.FC<AdminPageProps> = ({
   categories,
   initData,
   onRefreshProducts,
+  onRefreshCategories,
+  onRefreshReviews,
   t,
 }) => {
-  const [activeAdminSubTab, setActiveAdminSubTab] = useState<'products' | 'orders' | 'contest' | 'stats' | 'broadcast'>('products');
+  const [activeAdminSubTab, setActiveAdminSubTab] = useState<'products' | 'categories' | 'reviews' | 'orders' | 'contest' | 'stats' | 'broadcast'>('products');
+  const [localCategories, setLocalCategories] = useState<Category[]>(categories);
+  const [isCategoryModalOpen, setIsCategoryModalOpen] = useState(false);
+  const [newCatName, setNewCatName] = useState('');
+  const [newCatEmoji, setNewCatEmoji] = useState('🌸');
+  const [newCatSlug, setNewCatSlug] = useState('');
+  const [isSubmittingCat, setIsSubmittingCat] = useState(false);
+
+  // Reviews Admin States
+  const [reviewsList, setReviewsList] = useState<Review[]>([]);
+  const [reviewsFilter, setReviewsFilter] = useState<'all' | 'pending' | 'approved'>('all');
+  const [isLoadingReviews, setIsLoadingReviews] = useState(false);
   const [stats, setStats] = useState<AdminStats | null>(null);
   const [orders, setOrders] = useState<Order[]>([]);
   const [isProductModalOpen, setIsProductModalOpen] = useState(false);
@@ -91,6 +108,18 @@ export const AdminPage: React.FC<AdminPageProps> = ({
   const [broadcastText, setBroadcastText] = useState('');
   const [isBroadcasting, setIsBroadcasting] = useState(false);
   const [broadcastStatus, setBroadcastStatus] = useState<string | null>(null);
+
+  // Keep local categories in sync with props
+  useEffect(() => {
+    setLocalCategories(categories);
+  }, [categories]);
+
+  // Load reviews when tab changes
+  useEffect(() => {
+    if (activeAdminSubTab === 'reviews') {
+      fetchAdminReviews();
+    }
+  }, [activeAdminSubTab, initData]);
 
   // Load stats, orders, contest data
   useEffect(() => {
@@ -333,6 +362,126 @@ export const AdminPage: React.FC<AdminPageProps> = ({
     }
   };
 
+  const handleCreateCategory = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newCatName.trim()) return;
+    setIsSubmittingCat(true);
+    haptic.impact('medium');
+
+    const cleanSlug = (newCatSlug.trim() || newCatName.trim().toLowerCase().replace(/[^a-z0-9]/g, '-')).replace(/^-+|-+$/g, '');
+    try {
+      const resp = await fetch('/api/admin/categories', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Telegram-Init-Data': initData,
+        },
+        body: JSON.stringify({
+          name: newCatName.trim(),
+          emoji: newCatEmoji.trim() || '🌸',
+          slug: cleanSlug,
+          sort_order: localCategories.length,
+        }),
+      });
+
+      if (resp.ok) {
+        setIsCategoryModalOpen(false);
+        setNewCatName('');
+        setNewCatEmoji('🌸');
+        setNewCatSlug('');
+        onRefreshCategories?.();
+        haptic.notification('success');
+      } else {
+        const err = await resp.json();
+        alert(err.detail || "Xatolik yuz berdi");
+      }
+    } catch (e) {
+      console.error(e);
+      alert("Bo'lim qo'shishda xatolik");
+    } finally {
+      setIsSubmittingCat(false);
+    }
+  };
+
+  const handleDeleteCategory = async (slug: string, count: number) => {
+    const confirmMsg = count > 0
+      ? `Bu bo'limda ${count} ta mahsulot bor. Bo'lim va undagi barcha mahsulotlar o'chirilsinmi?`
+      : `Haqiqatan ham '#${slug}' bo'limini o'chirib tashlamoqchimisiz?`;
+    if (!window.confirm(confirmMsg)) return;
+
+    haptic.impact('heavy');
+    try {
+      const resp = await fetch(`/api/admin/categories/${encodeURIComponent(slug)}?force=true`, {
+        method: 'DELETE',
+        headers: { 'X-Telegram-Init-Data': initData },
+      });
+      if (resp.ok) {
+        onRefreshCategories?.();
+        onRefreshProducts();
+        haptic.notification('success');
+      } else {
+        const err = await resp.json();
+        alert(err.detail || "O'chirishda xatolik yuz berdi");
+      }
+    } catch (e) {
+      console.error(e);
+    }
+  };
+
+  const fetchAdminReviews = async () => {
+    setIsLoadingReviews(true);
+    try {
+      const resp = await fetch('/api/admin/reviews', {
+        headers: { 'X-Telegram-Init-Data': initData },
+      });
+      if (resp.ok) {
+        setReviewsList(await resp.json());
+      }
+    } catch (e) {
+      console.error(e);
+    } finally {
+      setIsLoadingReviews(false);
+    }
+  };
+
+  const handleDeleteReview = async (reviewId: number) => {
+    if (!window.confirm("Haqiqatan ham bu fikrni o'chirib tashlamoqchimisiz?")) return;
+    haptic.impact('heavy');
+    try {
+      const resp = await fetch(`/api/admin/reviews/${reviewId}`, {
+        method: 'DELETE',
+        headers: { 'X-Telegram-Init-Data': initData },
+      });
+      if (resp.ok) {
+        setReviewsList((prev) => prev.filter((r) => r.id !== reviewId));
+        onRefreshReviews?.();
+        haptic.notification('success');
+      } else {
+        alert("Fikrni o'chirishda xatolik");
+      }
+    } catch (e) {
+      console.error(e);
+    }
+  };
+
+  const handleToggleApproveReview = async (review: Review) => {
+    haptic.impact('light');
+    try {
+      const resp = await fetch(`/api/admin/reviews/${review.id}/approve?approved=${!review.approved}`, {
+        method: 'PATCH',
+        headers: { 'X-Telegram-Init-Data': initData },
+      });
+      if (resp.ok) {
+        const updated = await resp.json();
+        setReviewsList((prev) => prev.map((r) => (r.id === review.id ? updated : r)));
+        onRefreshReviews?.();
+        haptic.notification('success');
+      }
+    } catch (e) {
+      console.error(e);
+    }
+  };
+
   const handleToggleStock = async (product: Product) => {
     haptic.impact('light');
     try {
@@ -563,6 +712,26 @@ export const AdminPage: React.FC<AdminPageProps> = ({
           Mahsulotlar
         </button>
         <button
+          onClick={() => setActiveAdminSubTab('categories')}
+          className={`px-3 py-1.5 text-[11px] font-bold rounded-xl transition-all whitespace-nowrap ${
+            activeAdminSubTab === 'categories'
+              ? 'bg-sakura-rose text-white shadow-sm'
+              : 'text-sakura-plum/70 dark:text-sakura-blush/70'
+          }`}
+        >
+          🗂 Bo'limlar ({localCategories.length})
+        </button>
+        <button
+          onClick={() => setActiveAdminSubTab('reviews')}
+          className={`px-3 py-1.5 text-[11px] font-bold rounded-xl transition-all whitespace-nowrap ${
+            activeAdminSubTab === 'reviews'
+              ? 'bg-sakura-rose text-white shadow-sm'
+              : 'text-sakura-plum/70 dark:text-sakura-blush/70'
+          }`}
+        >
+          ⭐ Fikrlar ({reviewsList.length})
+        </button>
+        <button
           onClick={() => setActiveAdminSubTab('orders')}
           className={`px-3 py-1.5 text-[11px] font-bold rounded-xl transition-all whitespace-nowrap ${
             activeAdminSubTab === 'orders'
@@ -675,6 +844,180 @@ export const AdminPage: React.FC<AdminPageProps> = ({
               </div>
             ))}
           </div>
+        </div>
+      )}
+
+      {/* ================= CATEGORIES TAB ================= */}
+      {activeAdminSubTab === 'categories' && (
+        <div>
+          <button
+            onClick={() => setIsCategoryModalOpen(true)}
+            className="w-full py-3 mb-4 rounded-2xl bg-gradient-to-r from-sakura-rose to-sakura-darkrose text-white font-black text-xs flex items-center justify-center gap-2 shadow-sakura active:scale-98 transition-transform"
+          >
+            <Plus className="w-4 h-4" />
+            <span>➕ Yangi bo'lim (kategoriya) qo'shish</span>
+          </button>
+
+          <div className="flex flex-col gap-2.5">
+            {localCategories.map((c) => (
+              <div
+                key={c.slug}
+                className="p-3.5 rounded-2xl bg-white/90 dark:bg-sakura-darkcard/90 backdrop-blur-md border border-sakura-pink/20 shadow-xs flex items-center justify-between gap-3"
+              >
+                <div className="flex items-center gap-3 min-w-0">
+                  <div className="w-11 h-11 rounded-2xl bg-sakura-blush/80 dark:bg-sakura-darkcardsoft flex items-center justify-center text-xl shrink-0 border border-sakura-pink/30">
+                    {c.emoji || '🌸'}
+                  </div>
+                  <div className="min-w-0">
+                    <div className="flex items-center gap-1.5">
+                      <span className="font-extrabold text-sm text-sakura-plum dark:text-white truncate">
+                        {c.name}
+                      </span>
+                    </div>
+                    <div className="flex items-center gap-2 mt-0.5">
+                      <span className="text-[11px] font-bold text-sakura-rose">#{c.slug}</span>
+                      <span className="text-[10px] px-2 py-0.5 rounded-full bg-sakura-pink/20 text-sakura-darkrose dark:text-sakura-pink font-extrabold">
+                        {c.product_count || 0} ta mahsulot
+                      </span>
+                    </div>
+                  </div>
+                </div>
+
+                <button
+                  onClick={() => handleDeleteCategory(c.slug, c.product_count || 0)}
+                  title="Bo'limni o'chirish"
+                  className="p-2.5 rounded-xl bg-rose-50 hover:bg-rose-100 text-rose-600 dark:bg-rose-950/40 dark:text-rose-400 active:scale-90 transition-transform shrink-0"
+                >
+                  <Trash2 className="w-4 h-4" />
+                </button>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* ================= REVIEWS TAB ================= */}
+      {activeAdminSubTab === 'reviews' && (
+        <div>
+          <div className="flex items-center justify-between mb-3">
+            <span className="text-xs font-extrabold text-sakura-plum dark:text-white">
+              Jami fikrlar: {reviewsList.length} ta
+            </span>
+            <div className="flex gap-1 bg-white/70 dark:bg-sakura-darkcard p-0.5 rounded-xl border border-sakura-pink/20">
+              <button
+                onClick={() => setReviewsFilter('all')}
+                className={`px-2.5 py-1 text-[10px] font-bold rounded-lg ${
+                  reviewsFilter === 'all' ? 'bg-sakura-rose text-white' : 'text-sakura-plum/60'
+                }`}
+              >
+                Barchasi
+              </button>
+              <button
+                onClick={() => setReviewsFilter('pending')}
+                className={`px-2.5 py-1 text-[10px] font-bold rounded-lg ${
+                  reviewsFilter === 'pending' ? 'bg-sakura-rose text-white' : 'text-sakura-plum/60'
+                }`}
+              >
+                Kutilmoqda
+              </button>
+              <button
+                onClick={() => setReviewsFilter('approved')}
+                className={`px-2.5 py-1 text-[10px] font-bold rounded-lg ${
+                  reviewsFilter === 'approved' ? 'bg-sakura-rose text-white' : 'text-sakura-plum/60'
+                }`}
+              >
+                Tasdiqlangan
+              </button>
+            </div>
+          </div>
+
+          {isLoadingReviews ? (
+            <div className="py-8 text-center text-xs font-bold text-sakura-plum/50">
+              Fikrlar yuklanmoqda... 🌸
+            </div>
+          ) : reviewsList.length === 0 ? (
+            <div className="py-12 text-center rounded-2xl bg-white/60 dark:bg-sakura-darkcard/60 border border-dashed border-sakura-pink/30 p-4">
+              <Star className="w-8 h-8 text-sakura-rose/40 mx-auto mb-2" />
+              <p className="text-xs font-bold text-sakura-plum/60 dark:text-sakura-blush/60">
+                Hozircha birorta ham mijoz fikri yo'q
+              </p>
+            </div>
+          ) : (
+            <div className="flex flex-col gap-2.5">
+              {reviewsList
+                .filter((r) => {
+                  if (reviewsFilter === 'pending') return !r.approved;
+                  if (reviewsFilter === 'approved') return r.approved;
+                  return true;
+                })
+                .map((r) => (
+                  <div
+                    key={r.id}
+                    className="p-3.5 rounded-2xl bg-white/90 dark:bg-sakura-darkcard/90 backdrop-blur-md border border-sakura-pink/20 shadow-xs"
+                  >
+                    <div className="flex items-start justify-between gap-2 mb-2">
+                      <div>
+                        <div className="flex items-center gap-1.5">
+                          <span className="font-extrabold text-xs text-sakura-plum dark:text-white">
+                            {r.customer_name || 'Mijoz'}
+                          </span>
+                          <span
+                            className={`text-[9px] px-2 py-0.5 rounded-full font-extrabold ${
+                              r.approved
+                                ? 'bg-emerald-100 text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-400'
+                                : 'bg-amber-100 text-amber-700 dark:bg-amber-950/60 dark:text-amber-400'
+                            }`}
+                          >
+                            {r.approved ? 'Tasdiqlangan ✅' : 'Kutilmoqda ⏳'}
+                          </span>
+                        </div>
+                        <span className="text-[10px] text-sakura-plum/40 dark:text-sakura-blush/40 block mt-0.5">
+                          {r.created_at ? new Date(r.created_at).toLocaleDateString() : ''}
+                        </span>
+                      </div>
+
+                      <div className="flex items-center gap-1">
+                        <button
+                          onClick={() => handleToggleApproveReview(r)}
+                          title={r.approved ? "Yashirish" : "Tasdiqlash"}
+                          className={`p-1.5 rounded-xl active:scale-90 transition-transform ${
+                            r.approved
+                              ? 'bg-amber-50 text-amber-600 hover:bg-amber-100'
+                              : 'bg-emerald-50 text-emerald-600 hover:bg-emerald-100'
+                          }`}
+                        >
+                          {r.approved ? <Ban className="w-4 h-4" /> : <Check className="w-4 h-4" />}
+                        </button>
+                        <button
+                          onClick={() => handleDeleteReview(r.id)}
+                          title="Fikrni o'chirish"
+                          className="p-1.5 rounded-xl bg-rose-50 hover:bg-rose-100 text-rose-600 active:scale-90 transition-transform"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                      </div>
+                    </div>
+
+                    <p className="text-xs font-medium text-sakura-plum/80 dark:text-sakura-blush/80 leading-relaxed bg-sakura-bg/40 dark:bg-sakura-darkcardsoft p-2.5 rounded-xl">
+                      "{r.text}"
+                    </p>
+
+                    {r.photos && r.photos.length > 0 && (
+                      <div className="flex gap-2 mt-2.5 overflow-x-auto pb-1">
+                        {r.photos.map((ph, idx) => (
+                          <img
+                            key={idx}
+                            src={getMediaUrl(ph)}
+                            alt=""
+                            className="w-14 h-14 rounded-xl object-cover shrink-0 border border-sakura-pink/20"
+                          />
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                ))}
+            </div>
+          )}
         </div>
       )}
 
