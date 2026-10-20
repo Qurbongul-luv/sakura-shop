@@ -54,6 +54,7 @@ class CategoryWizard(StatesGroup):
 
 
 class AdminSettingsState(StatesGroup):
+    waiting_for_owner_forward = State()
     waiting_for_admin_forward = State()
     waiting_for_broadcast_text = State()
 
@@ -77,20 +78,24 @@ router.callback_query.filter(admin_only)
 
 async def _claim_ownership_helper(message: Message, user_id: int):
     async with async_session_factory() as session:
-        res_owner = await session.execute(select(Admin).where(Admin.role == "owner"))
-        if res_owner.scalars().first() is not None:
-            await message.answer("🌸 Kechirasiz, bu do'konning egasi allaqachon biriktirilgan.")
-            return False
+        res_me = await session.execute(select(Admin).where(Admin.telegram_id == user_id))
+        me = res_me.scalars().first()
+        if me and me.role == "owner":
+            await message.answer("🌸 Siz allaqachon do'kon egasisiz! /admin buyrug'ini bosing.")
+            return True
 
         full_name = message.from_user.full_name or "Owner"
         username = message.from_user.username
-        new_owner = Admin(
-            telegram_id=user_id,
-            name=full_name,
-            username=username,
-            role="owner",
-        )
-        session.add(new_owner)
+        if me:
+            me.role = "owner"
+        else:
+            new_owner = Admin(
+                telegram_id=user_id,
+                name=full_name,
+                username=username,
+                role="owner",
+            )
+            session.add(new_owner)
         res_claimed = await session.execute(select(Setting).where(Setting.key == "owner_claimed_at"))
         claimed_setting = res_claimed.scalars().first()
         if claimed_setting:
@@ -707,7 +712,10 @@ async def handle_admin_settings_menu(callback: CallbackQuery):
     markup = InlineKeyboardMarkup(
         inline_keyboard=[
             [
-                InlineKeyboardButton(text="➕ Yangi admin qo'shish", callback_data="admin_add_new_admin"),
+                InlineKeyboardButton(text="👑 Yangi Owner qo'shish", callback_data="admin_add_co_owner"),
+                InlineKeyboardButton(text="➕ Yangi Admin qo'shish", callback_data="admin_add_new_admin"),
+            ],
+            [
                 InlineKeyboardButton(text="📢 Kanalni uzish", callback_data="admin_unlink_channel"),
             ],
             [
@@ -718,6 +726,67 @@ async def handle_admin_settings_menu(callback: CallbackQuery):
     )
     await callback.message.edit_text(text, reply_markup=markup)
     await callback.answer()
+
+
+@router.callback_query(F.data == "admin_add_co_owner")
+async def handle_start_add_co_owner(callback: CallbackQuery, state: FSMContext):
+    await state.set_state(AdminSettingsState.waiting_for_owner_forward)
+    invite_link = f"https://t.me/sakuraaa_chinese_shop_bot?start=claim_{settings.OWNER_SETUP_CODE}"
+    await callback.message.answer(
+        "👑 <b>Yangi Do'kon Egasi (Co-Owner) qo'shish:</b>\n\n"
+        "2 xil usulda qo'shishingiz mumkin:\n\n"
+        "1️⃣ <b>Havola orqali:</b> Quyidagi havolani o'sha insonga yuboring, u bitta bosishda teng huquqli Owner bo'ladi:\n"
+        f"👉 <code>{invite_link}</code>\n\n"
+        "2️⃣ <b>Yoki shu yerda:</b> O'sha insonning istalgan xabarini bu yerga <b>forward</b> qiling, kontaktini yuboring yoki uning Telegram ID raqamini yozing:",
+        reply_markup=ReplyKeyboardMarkup(
+            keyboard=[[KeyboardButton(text="❌ Bekor qilish")]],
+            resize_keyboard=True,
+        )
+    )
+    await callback.answer()
+
+
+@router.message(AdminSettingsState.waiting_for_owner_forward)
+async def process_new_owner_forward(message: Message, state: FSMContext):
+    if message.text == "❌ Bekor qilish":
+        await state.clear()
+        await message.answer("❌ Jarayon bekor qilindi.", reply_markup=get_main_reply_keyboard())
+        await message.answer("👑 Admin menyusi:", reply_markup=get_admin_main_keyboard())
+        return
+
+    new_owner_id = None
+    new_owner_name = ""
+    new_owner_username = None
+
+    if message.forward_from:
+        new_owner_id = message.forward_from.id
+        new_owner_name = message.forward_from.full_name
+        new_owner_username = message.forward_from.username
+    elif message.contact:
+        new_owner_id = message.contact.user_id
+        new_owner_name = message.contact.first_name
+    elif message.text and message.text.isdigit():
+        new_owner_id = int(message.text)
+        new_owner_name = "Co-Owner"
+
+    if not new_owner_id:
+        await message.answer("⚠️ Foydalanuvchini aniqlab bo'lmadi. Iltimos, xabarni forward qiling yoki uning Telegram ID raqamini yozing:")
+        return
+
+    async with async_session_factory() as session:
+        res = await session.execute(select(Admin).where(Admin.telegram_id == new_owner_id))
+        existing = res.scalars().first()
+        if existing:
+            existing.role = "owner"
+            await session.commit()
+            await message.answer(f"✅ <b>{existing.name}</b> (ID: <code>{new_owner_id}</code>) ning roli <b>Owner</b> ga yangilandi! 👑")
+        else:
+            session.add(Admin(telegram_id=new_owner_id, name=new_owner_name, username=new_owner_username, role="owner"))
+            await session.commit()
+            await message.answer(f"✅ <b>{new_owner_name}</b> (ID: <code>{new_owner_id}</code>) muvaffaqiyatli teng huquqli <b>Do'kon Egasi (Owner)</b> etib tayinlandi! 👑🌸")
+
+    await state.clear()
+    await message.answer("👑 Admin menyusi:", reply_markup=get_admin_main_keyboard())
 
 
 @router.callback_query(F.data == "admin_add_new_admin")

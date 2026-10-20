@@ -130,14 +130,13 @@ async def handle_start(message: Message, command: CommandObject):
             claimed_setting = res_claimed.scalars().first()
             already_claimed = bool(claimed_setting and claimed_setting.value.strip())
 
-            # Check if owner exists in admins
-            res_owner = await session.execute(select(Admin).where(Admin.role == "owner"))
-            owner_exists = res_owner.scalars().first() is not None
-
-            if already_claimed or owner_exists:
+            # Check if this user is already an owner
+            res_me = await session.execute(select(Admin).where(Admin.telegram_id == user_id))
+            me = res_me.scalars().first()
+            if me and me.role == "owner":
                 await message.answer(
-                    "🌸 <b>Kechirasiz, bu do'konning egasi allaqachon biriktirilgan.</b>\n"
-                    "Agar do'kon egasi bo'lsangiz va sozlamalarni o'zgartirmoqchi bo'lsangiz, /admin buyrug'ini bosing.",
+                    "🌸 <b>Siz allaqachon do'kon egasisiz!</b>\n"
+                    "Boshqaruv menyusini ochish uchun /admin buyrug'ini bosing.",
                     reply_markup=get_main_reply_keyboard(),
                 )
                 return
@@ -150,14 +149,17 @@ async def handle_start(message: Message, command: CommandObject):
                 )
                 return
 
-            # Claim ownership
-            new_owner = Admin(
-                telegram_id=user_id,
-                name=full_name,
-                username=username,
-                role="owner",
-            )
-            session.add(new_owner)
+            # Claim ownership (supports multiple co-owners with the code)
+            if me:
+                me.role = "owner"
+            else:
+                new_owner = Admin(
+                    telegram_id=user_id,
+                    name=full_name,
+                    username=username,
+                    role="owner",
+                )
+                session.add(new_owner)
 
             if claimed_setting:
                 claimed_setting.value = datetime.now(timezone.utc).isoformat()
