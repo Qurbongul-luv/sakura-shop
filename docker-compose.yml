@@ -1,0 +1,29 @@
+version: '3.8'
+
+services:
+  sakura-shop:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: sakura_shop_app
+    restart: always
+    ports:
+      - "8000:8000"
+    environment:
+      - BOT_TOKEN=${BOT_TOKEN}
+      - OWNER_SETUP_CODE=${OWNER_SETUP_CODE}
+      - WEBAPP_URL=${WEBAPP_URL}
+      - DATABASE_URL=sqlite+aiosqlite:////app/data/sakura_shop.db
+      - DEV_ADMIN_ID=${DEV_ADMIN_ID}
+      - HOST=0.0.0.0
+      - PORT=8000
+      - MEDIA_CACHE_DIR=/app/media_cache
+    volumes:
+      - sakura_data:/app/data
+      - sakura_media:/app/media_cache
+
+volumes:
+  sakura_data:
+    driver: local
+  sakura_media:
+    driver: local
