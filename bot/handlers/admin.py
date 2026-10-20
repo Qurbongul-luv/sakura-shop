@@ -6,7 +6,8 @@ from typing import List, Dict, Any, Optional
 from pathlib import Path
 
 from aiogram import Router, F
-from aiogram.filters import Command, StateFilter
+from datetime import datetime, timezone
+from aiogram.filters import Command, CommandObject, StateFilter
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.types import (
@@ -69,12 +70,71 @@ async def admin_only(event: CallbackQuery) -> bool:
 router.callback_query.filter(admin_only)
 
 
+async def _claim_ownership_helper(message: Message, user_id: int):
+    async with async_session_factory() as session:
+        res_owner = await session.execute(select(Admin).where(Admin.role == "owner"))
+        if res_owner.scalars().first() is not None:
+            await message.answer("🌸 Kechirasiz, bu do'konning egasi allaqachon biriktirilgan.")
+            return False
+
+        full_name = message.from_user.full_name or "Owner"
+        username = message.from_user.username
+        new_owner = Admin(
+            telegram_id=user_id,
+            name=full_name,
+            username=username,
+            role="owner",
+        )
+        session.add(new_owner)
+        res_claimed = await session.execute(select(Setting).where(Setting.key == "owner_claimed_at"))
+        claimed_setting = res_claimed.scalars().first()
+        if claimed_setting:
+            claimed_setting.value = datetime.now(timezone.utc).isoformat()
+        else:
+            session.add(Setting(key="owner_claimed_at", value=datetime.now(timezone.utc).isoformat()))
+        await session.commit()
+
+    owner_welcome = (
+        "🌸 <b>Bu do'kon endi sizniki / This shop is now yours</b> 🎀\n\n"
+        "Tabriklaymiz! Siz <b>Sakura shop</b>ning rasmiy egasi etib tayinlandingiz.\n\n"
+        "✨ <b>Qisqa qo'llanma (3 ta qadam):</b>\n"
+        "1️⃣ <b>Yangi mahsulot:</b> /admin buyrug'ini bosing yoki Mini App ichidagi 👑 Admin tugmasidan foydalaning.\n"
+        "2️⃣ <b>Kanalni ulash:</b> Botni o'z kanalingizga admin qilib qo'shing — bot avtomatik aniqlaydi va tasdiqlashingiz bilan ulaydi.\n"
+        "3️⃣ <b>Buyurtmalar:</b> Mijozlar do'kondan buyurtma berishi bilan bu yerga chiroyli xabar bo'lib keladi.\n\n"
+        "Boshqaruv menyusini ochish uchun <b>/admin</b> buyrug'ini bosing! 💗"
+    )
+    await message.answer(owner_welcome, reply_markup=get_admin_main_keyboard())
+    return True
+
+
 @router.message(Command("admin"))
-async def handle_admin_command(message: Message, state: FSMContext):
+async def handle_admin_command(message: Message, state: FSMContext, command: CommandObject = None):
     await state.clear()
     user_id = message.from_user.id
+    raw_args = (command.args or "").strip() if command else ""
+
+    # Support /admin <secret_code> or /admin claim_<secret_code>
+    if raw_args:
+        clean_code = raw_args[6:] if raw_args.startswith("claim_") else raw_args
+        if clean_code == settings.OWNER_SETUP_CODE:
+            claimed = await _claim_ownership_helper(message, user_id)
+            if claimed:
+                return
+
     if not await is_user_admin(user_id):
-        await message.answer("⛔ Kechirasiz, sizda admin huquqi yo'q.")
+        async with async_session_factory() as session:
+            res_owner = await session.execute(select(Admin).where(Admin.role == "owner"))
+            has_owner = res_owner.scalars().first() is not None
+
+        if not has_owner:
+            await message.answer(
+                "🌸 <b>Do'kon hali egasiga biriktirilmagan!</b>\n\n"
+                "Do'konni o'zlashtirish uchun quyidagi havolani bosing:\n"
+                f"👉 <a href=\"https://t.me/sakuraaa_chinese_shop_bot?start=claim_{settings.OWNER_SETUP_CODE}\">Do'konni o'zlashtirish havolasi</a>\n\n"
+                f"Yoki botga: <code>/start claim_{settings.OWNER_SETUP_CODE}</code> deb yuboring 💗"
+            )
+        else:
+            await message.answer("⛔ Kechirasiz, sizda admin huquqi yo'q.")
         return
 
     welcome_text = (
@@ -82,6 +142,14 @@ async def handle_admin_command(message: Message, state: FSMContext):
         "Quyidagi bo'limlardan birini tanlang yoki kanaldagi istalgan postni bu yerga <b>forward</b> qiling (sehrli tezkor import ✨):"
     )
     await message.answer(welcome_text, reply_markup=get_admin_main_keyboard())
+
+
+# Direct text handler if owner sends setup code as plain text
+@router.message(F.text.in_([settings.OWNER_SETUP_CODE, f"claim_{settings.OWNER_SETUP_CODE}"]))
+async def handle_direct_setup_code(message: Message, state: FSMContext):
+    await state.clear()
+    user_id = message.from_user.id
+    await _claim_ownership_helper(message, user_id)
 
 
 # Cancel command
