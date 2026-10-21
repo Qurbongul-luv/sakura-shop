@@ -28,7 +28,8 @@ from bot.loader import bot, dp
 from bot.services.contest_scheduler import run_contest_scheduler
 from db.generate_images import generate_demo_images
 from db.seed import seed_database
-from db.session import init_db
+from db.session import init_db, engine
+from bot.services.ownership import setup_code_is_safe
 
 logging.basicConfig(
     level=logging.INFO,
@@ -48,6 +49,13 @@ async def lifespan(app: FastAPI):
     generate_demo_images(settings.MEDIA_CACHE_DIR)
     await seed_database()
     logger.info("Database and demo media initialized successfully.")
+    # On Render, "sqlite" here means DATABASE_URL is missing and data is wiped on every restart.
+    logger.info(f"Database backend: {engine.dialect.name}")
+    if not setup_code_is_safe():
+        logger.warning(
+            "OWNER_SETUP_CODE is empty, shorter than 16 chars or the public default: "
+            "first-owner claim is disabled. Set a long random value in the environment."
+        )
 
     # 2. Start Bot Polling and Contest Scheduler if configured
     global bot_polling_task, contest_scheduler_task

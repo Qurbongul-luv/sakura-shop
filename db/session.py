@@ -21,10 +21,15 @@ if "postgresql" in db_url:
         db_url = db_url.replace("-pooler.", ".")
         db_url = db_url.replace("&channel_binding=require", "").replace("channel_binding=require&", "").replace("channel_binding=require", "")
 
+# Neon suspends idle compute (~5 min) and drops pooled connections; ping before use and
+# recycle old ones so the first request after a quiet period doesn't fail.
+pool_options = {"pool_pre_ping": True, "pool_recycle": 240} if "postgresql" in db_url else {}
+
 engine = create_async_engine(
     db_url,
     echo=False,
     future=True,
+    **pool_options,
 )
 
 async_session_factory = async_sessionmaker(

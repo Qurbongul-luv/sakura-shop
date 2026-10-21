@@ -123,51 +123,28 @@ async def handle_start(message: Message, command: CommandObject):
 
     # 2. Check for OWNER CLAIM deep link: /start claim_<CODE>
     if payload.startswith("claim_"):
-        claim_code = payload[6:].strip()
+        from bot.services.ownership import claim_ownership
+
         async with async_session_factory() as session:
-            # Check if owner already claimed
-            res_claimed = await session.execute(select(Setting).where(Setting.key == "owner_claimed_at"))
-            claimed_setting = res_claimed.scalars().first()
-            already_claimed = bool(claimed_setting and claimed_setting.value.strip())
+            result = await claim_ownership(session, payload[6:], user_id, full_name, username)
 
-            # Check if this user is already an owner
-            res_me = await session.execute(select(Admin).where(Admin.telegram_id == user_id))
-            me = res_me.scalars().first()
-            if me and me.role == "owner":
-                await message.answer(
-                    "🌸 <b>Siz allaqachon do'kon egasisiz!</b>\n"
-                    "Boshqaruv menyusini ochish uchun /admin buyrug'ini bosing.",
-                    reply_markup=get_main_reply_keyboard(),
-                )
-                return
+        if result == "already_owner":
+            await message.answer(
+                "🌸 <b>Siz allaqachon do'kon egasisiz!</b>\n"
+                "Boshqaruv menyusini ochish uchun /admin buyrug'ini bosing.",
+                reply_markup=get_main_reply_keyboard(),
+            )
+            return
 
-            # Verify claim code
-            if claim_code != settings.OWNER_SETUP_CODE:
-                await message.answer(
-                    "❌ <b>Noto'g'ri claim kodi!</b> Do'konni biriktirib bo'lmadi.",
-                    reply_markup=get_main_reply_keyboard(),
-                )
-                return
+        if result == "invalid":
+            await message.answer(
+                "❌ <b>Bu havola yaroqsiz yoki allaqachon ishlatilgan.</b>\n"
+                "Yangi havolani do'kon egasidan so'rang 🌸",
+                reply_markup=get_main_reply_keyboard(),
+            )
+            return
 
-            # Claim ownership (supports multiple co-owners with the code)
-            if me:
-                me.role = "owner"
-            else:
-                new_owner = Admin(
-                    telegram_id=user_id,
-                    name=full_name,
-                    username=username,
-                    role="owner",
-                )
-                session.add(new_owner)
-
-            if claimed_setting:
-                claimed_setting.value = datetime.now(timezone.utc).isoformat()
-            else:
-                session.add(Setting(key="owner_claimed_at", value=datetime.now(timezone.utc).isoformat()))
-
-            await session.commit()
-
+        if result == "claimed":
             owner_welcome = (
                 "🌸 <b>Bu do'kon endi sizniki / This shop is now yours</b> 🎀\n\n"
                 "Tabriklaymiz! Siz <b>Sakura shop</b>ning rasmiy egasi etib tayinlandingiz.\n\n"

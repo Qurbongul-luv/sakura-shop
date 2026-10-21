@@ -27,6 +27,7 @@ from api.config import settings
 from api.services.formatters import format_price, calculate_cargo, parse_channel_post, build_channel_caption
 from bot.keyboards.reply import get_admin_main_keyboard, get_main_reply_keyboard
 from bot.services.channel_post import post_product_to_channel
+from bot.services.ownership import claim_ownership, create_owner_invite
 from db.models import Admin, Product, Category, Review, Order, User, Setting
 from db.session import async_session_factory
 
@@ -76,33 +77,17 @@ async def admin_only(event: CallbackQuery) -> bool:
 router.callback_query.filter(admin_only)
 
 
-async def _claim_ownership_helper(message: Message, user_id: int):
+async def _claim_ownership_helper(message: Message, user_id: int, code: str) -> bool:
+    """Returns False when the code is not a valid claim (caller continues as a normal user)."""
     async with async_session_factory() as session:
-        res_me = await session.execute(select(Admin).where(Admin.telegram_id == user_id))
-        me = res_me.scalars().first()
-        if me and me.role == "owner":
-            await message.answer("🌸 Siz allaqachon do'kon egasisiz! /admin buyrug'ini bosing.")
-            return True
-
-        full_name = message.from_user.full_name or "Owner"
-        username = message.from_user.username
-        if me:
-            me.role = "owner"
-        else:
-            new_owner = Admin(
-                telegram_id=user_id,
-                name=full_name,
-                username=username,
-                role="owner",
-            )
-            session.add(new_owner)
-        res_claimed = await session.execute(select(Setting).where(Setting.key == "owner_claimed_at"))
-        claimed_setting = res_claimed.scalars().first()
-        if claimed_setting:
-            claimed_setting.value = datetime.now(timezone.utc).isoformat()
-        else:
-            session.add(Setting(key="owner_claimed_at", value=datetime.now(timezone.utc).isoformat()))
-        await session.commit()
+        result = await claim_ownership(
+            session, code, user_id, message.from_user.full_name or "Owner", message.from_user.username
+        )
+    if result == "already_owner":
+        await message.answer("🌸 Siz allaqachon do'kon egasisiz! /admin buyrug'ini bosing.")
+        return True
+    if result == "invalid":
+        return False
 
     owner_welcome = (
         "🌸 <b>Bu do'kon endi sizniki / This shop is now yours</b> 🎀\n\n"
@@ -126,10 +111,8 @@ async def handle_admin_command(message: Message, state: FSMContext, command: Com
     # Support /admin <secret_code> or /admin claim_<secret_code>
     if raw_args:
         clean_code = raw_args[6:] if raw_args.startswith("claim_") else raw_args
-        if clean_code == settings.OWNER_SETUP_CODE:
-            claimed = await _claim_ownership_helper(message, user_id)
-            if claimed:
-                return
+        if await _claim_ownership_helper(message, user_id, clean_code):
+            return
 
     if not await is_user_admin(user_id):
         async with async_session_factory() as session:
@@ -137,11 +120,10 @@ async def handle_admin_command(message: Message, state: FSMContext, command: Com
             has_owner = res_owner.scalars().first() is not None
 
         if not has_owner:
+            # Never reveal the setup code here: anyone can send /admin.
             await message.answer(
-                "🌸 <b>Do'kon hali egasiga biriktirilmagan!</b>\n\n"
-                "Do'konni o'zlashtirish uchun quyidagi havolani bosing:\n"
-                f"👉 <a href=\"https://t.me/sakuraaa_chinese_shop_bot?start=claim_{settings.OWNER_SETUP_CODE}\">Do'konni o'zlashtirish havolasi</a>\n\n"
-                f"Yoki botga: <code>/start claim_{settings.OWNER_SETUP_CODE}</code> deb yuboring 💗"
+                "🌸 <b>Do'kon hali egasiga biriktirilmagan.</b>\n\n"
+                "Do'kon egasi maxsus havola orqali biriktiriladi 💗"
             )
         else:
             await message.answer("⛔ Kechirasiz, sizda admin huquqi yo'q.")
@@ -159,7 +141,9 @@ async def handle_admin_command(message: Message, state: FSMContext, command: Com
 async def handle_direct_setup_code(message: Message, state: FSMContext):
     await state.clear()
     user_id = message.from_user.id
-    await _claim_ownership_helper(message, user_id)
+    code = message.text.strip()
+    if not await _claim_ownership_helper(message, user_id, code[6:] if code.startswith("claim_") else code):
+        await message.answer("❌ Bu kod yaroqsiz yoki allaqachon ishlatilgan.")
 
 
 # Cancel command
@@ -730,12 +714,23 @@ async def handle_admin_settings_menu(callback: CallbackQuery):
 
 @router.callback_query(F.data == "admin_add_co_owner")
 async def handle_start_add_co_owner(callback: CallbackQuery, state: FSMContext):
+    async with async_session_factory() as session:
+        caller = (
+            await session.execute(select(Admin).where(Admin.telegram_id == callback.from_user.id))
+        ).scalars().first()
+        # Plain admins must not be able to promote themselves or others to owner.
+        if not (caller and caller.role == "owner") and callback.from_user.id != settings.DEV_ADMIN_ID:
+            await callback.answer("⛔ Yangi egani faqat do'kon egasi qo'sha oladi.", show_alert=True)
+            return
+        token = await create_owner_invite(session)
     await state.set_state(AdminSettingsState.waiting_for_owner_forward)
-    invite_link = f"https://t.me/sakuraaa_chinese_shop_bot?start=claim_{settings.OWNER_SETUP_CODE}"
+    bot_me = await callback.bot.get_me()
+    invite_link = f"https://t.me/{bot_me.username}?start=claim_{token}"
     await callback.message.answer(
         "👑 <b>Yangi Do'kon Egasi (Co-Owner) qo'shish:</b>\n\n"
         "2 xil usulda qo'shishingiz mumkin:\n\n"
-        "1️⃣ <b>Havola orqali:</b> Quyidagi havolani o'sha insonga yuboring, u bitta bosishda teng huquqli Owner bo'ladi:\n"
+        "1️⃣ <b>Havola orqali:</b> Quyidagi havolani o'sha insonga yuboring, u bitta bosishda teng huquqli Owner bo'ladi.\n"
+        "⚠️ Havola <b>faqat bir marta</b> ishlaydi va uni faqat o'sha insonga yuboring. Yangi havola yaratilsa, eskisi o'chadi.\n"
         f"👉 <code>{invite_link}</code>\n\n"
         "2️⃣ <b>Yoki shu yerda:</b> O'sha insonning istalgan xabarini bu yerga <b>forward</b> qiling, kontaktini yuboring yoki uning Telegram ID raqamini yozing:",
         reply_markup=ReplyKeyboardMarkup(
