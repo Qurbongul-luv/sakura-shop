@@ -157,7 +157,7 @@ async def handle_cancel_wizard(message: Message, state: FSMContext):
 
 
 # ==================== MAGIC SHORTCUT: FORWARDED CHANNEL POST ====================
-@router.message(F.forward_from_chat | F.forward_date)
+@router.message(StateFilter(None), F.forward_from_chat)
 async def handle_forwarded_post(message: Message, state: FSMContext):
     user_id = message.from_user.id
     if not await is_user_admin(user_id):
@@ -743,7 +743,8 @@ async def handle_start_add_co_owner(callback: CallbackQuery, state: FSMContext):
 
 @router.message(AdminSettingsState.waiting_for_owner_forward)
 async def process_new_owner_forward(message: Message, state: FSMContext):
-    if message.text == "❌ Bekor qilish":
+    text_val = (message.text or "").strip()
+    if text_val in ["❌ Bekor qilish", "/cancel"]:
         await state.clear()
         await message.answer("❌ Jarayon bekor qilindi.", reply_markup=get_main_reply_keyboard())
         await message.answer("👑 Admin menyusi:", reply_markup=get_admin_main_keyboard())
@@ -755,17 +756,44 @@ async def process_new_owner_forward(message: Message, state: FSMContext):
 
     if message.forward_from:
         new_owner_id = message.forward_from.id
-        new_owner_name = message.forward_from.full_name
+        new_owner_name = message.forward_from.full_name or "Co-Owner"
         new_owner_username = message.forward_from.username
     elif message.contact:
         new_owner_id = message.contact.user_id
-        new_owner_name = message.contact.first_name
-    elif message.text and message.text.isdigit():
-        new_owner_id = int(message.text)
+        new_owner_name = message.contact.first_name or "Co-Owner"
+    elif text_val.isdigit():
+        new_owner_id = int(text_val)
         new_owner_name = "Co-Owner"
+    elif text_val.startswith("@") or re.match(r'^[a-zA-Z0-9_]{4,}$', text_val):
+        clean_user = text_val.lstrip("@").lower()
+        async with async_session_factory() as session:
+            res_u = await session.execute(select(User).where(func.lower(User.username) == clean_user))
+            u = res_u.scalars().first()
+            if u:
+                new_owner_id = u.telegram_id
+                new_owner_name = u.name or clean_user
+                new_owner_username = u.username
+
+    # Handle forward from user whose Telegram privacy hides account ID
+    if not new_owner_id and message.forward_sender_name:
+        clean_sender = message.forward_sender_name.strip().lower()
+        async with async_session_factory() as session:
+            res_u = await session.execute(select(User).where(func.lower(User.name) == clean_sender))
+            u = res_u.scalars().first()
+            if u:
+                new_owner_id = u.telegram_id
+                new_owner_name = u.name
+                new_owner_username = u.username
 
     if not new_owner_id:
-        await message.answer("⚠️ Foydalanuvchini aniqlab bo'lmadi. Iltimos, xabarni forward qiling yoki uning Telegram ID raqamini yozing:")
+        invite_link = f"https://t.me/sakuraaa_chinese_shop_bot?start=claim_{settings.OWNER_SETUP_CODE}"
+        await message.answer(
+            "⚠️ <b>Foydalanuvchini aniqlab bo'lmadi!</b>\n\n"
+            "Telegram maxfiylik sozlamalari (Forward Privacy) bu insonning profilini yashirgan bo'lishi mumkin.\n\n"
+            "Uni Owner qilishning eng oson yo'llari:\n"
+            f"1️⃣ O'sha insonga mana bu havolani yuboring (u 1 ta bosishda Owner bo'ladi):\n<code>{invite_link}</code>\n\n"
+            "2️⃣ Yoki uning <b>@username</b> (masalan: <code>@fkhrdnvvvva</code>) yoki <b>Telegram ID</b> raqamini yozing:"
+        )
         return
 
     async with async_session_factory() as session:
@@ -800,29 +828,62 @@ async def handle_start_add_admin(callback: CallbackQuery, state: FSMContext):
 
 @router.message(AdminSettingsState.waiting_for_admin_forward)
 async def process_new_admin_forward(message: Message, state: FSMContext):
+    text_val = (message.text or "").strip()
+    if text_val in ["❌ Bekor qilish", "/cancel"]:
+        await state.clear()
+        await message.answer("❌ Jarayon bekor qilindi.", reply_markup=get_main_reply_keyboard())
+        await message.answer("👑 Admin menyusi:", reply_markup=get_admin_main_keyboard())
+        return
+
     new_admin_id = None
     new_admin_name = ""
+    new_admin_username = None
 
     if message.forward_from:
         new_admin_id = message.forward_from.id
-        new_admin_name = message.forward_from.full_name
+        new_admin_name = message.forward_from.full_name or "Admin"
+        new_admin_username = message.forward_from.username
     elif message.contact:
         new_admin_id = message.contact.user_id
-        new_admin_name = message.contact.first_name
-    elif message.text and message.text.isdigit():
-        new_admin_id = int(message.text)
+        new_admin_name = message.contact.first_name or "Admin"
+    elif text_val.isdigit():
+        new_admin_id = int(text_val)
         new_admin_name = "Admin"
+    elif text_val.startswith("@") or re.match(r'^[a-zA-Z0-9_]{4,}$', text_val):
+        clean_user = text_val.lstrip("@").lower()
+        async with async_session_factory() as session:
+            res_u = await session.execute(select(User).where(func.lower(User.username) == clean_user))
+            u = res_u.scalars().first()
+            if u:
+                new_admin_id = u.telegram_id
+                new_admin_name = u.name or clean_user
+                new_admin_username = u.username
+
+    # Handle forward from user whose Telegram privacy hides account ID
+    if not new_admin_id and message.forward_sender_name:
+        clean_sender = message.forward_sender_name.strip().lower()
+        async with async_session_factory() as session:
+            res_u = await session.execute(select(User).where(func.lower(User.name) == clean_sender))
+            u = res_u.scalars().first()
+            if u:
+                new_admin_id = u.telegram_id
+                new_admin_name = u.name
+                new_admin_username = u.username
 
     if not new_admin_id:
-        await message.answer("⚠️ Foydalanuvchini aniqlab bo'lmadi. Iltimos, xabarni forward qiling yoki uning Telegram ID raqamini yozing:")
+        await message.answer(
+            "⚠️ <b>Foydalanuvchini aniqlab bo'lmadi!</b>\n\n"
+            "Telegram maxfiylik sozlamalari (Forward Privacy) bu insonning profilini yashirgan bo'lishi mumkin.\n\n"
+            "Iltimos, uning <b>@username</b> (masalan: <code>@fkhrdnvvvva</code>) yoki <b>Telegram ID</b> raqamini yozing:"
+        )
         return
 
     async with async_session_factory() as session:
         existing = await session.execute(select(Admin).where(Admin.telegram_id == new_admin_id))
         if existing.scalars().first():
-            await message.answer("Ushbu foydalanuvchi allaqachon admin!")
+            await message.answer("Ushbu foydalanuvchi allaqachon admin yoki owner!")
         else:
-            session.add(Admin(telegram_id=new_admin_id, name=new_admin_name, role="admin"))
+            session.add(Admin(telegram_id=new_admin_id, name=new_admin_name, username=new_owner_username if 'new_owner_username' in locals() else new_admin_username, role="admin"))
             await session.commit()
             await message.answer(f"✅ <b>{new_admin_name}</b> (ID: <code>{new_admin_id}</code>) muvaffaqiyatli admin etib tayinlandi! 🌸")
 
