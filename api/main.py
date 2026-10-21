@@ -25,6 +25,7 @@ from api.routes import (
 )
 from bot.bot import setup_routers, setup_bot_commands, notify_admins_of_error
 from bot.loader import bot, dp
+from bot.runtime import BotRuntime
 from bot.services.contest_scheduler import run_contest_scheduler
 from db.generate_images import generate_demo_images
 from db.seed import seed_database
@@ -39,10 +40,15 @@ logger = logging.getLogger("sakura_shop")
 
 bot_polling_task = None
 contest_scheduler_task = None
+bot_runtime = BotRuntime(bot, dp, mode="polling" if settings.BOT_POLLING_ENABLED else "disabled")
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    # Fail before seeding an ephemeral SQLite database on Render.
+    if os.getenv("RENDER") == "true" and engine.dialect.name != "postgresql":
+        logger.error("Database backend: %s; Render requires DATABASE_URL pointing to PostgreSQL", engine.dialect.name)
+        raise RuntimeError("Configure a Neon/PostgreSQL DATABASE_URL in Render Environment")
     # 1. Initialize DB and seed demo data
     logger.info("Initializing database...")
     await init_db()
@@ -59,51 +65,31 @@ async def lifespan(app: FastAPI):
 
     # 2. Start Bot Polling and Contest Scheduler if configured
     global bot_polling_task, contest_scheduler_task
-    if bot and dp:
-        setup_routers(dp)
+    if bot and dp and settings.BOT_POLLING_ENABLED:
+        if not dp.sub_routers:
+            setup_routers(dp)
         await setup_bot_commands(bot)
-
-        async def start_polling():
-            try:
-                logger.info("Starting Telegram Bot polling with chat_member updates...")
-                await dp.start_polling(
-                    bot,
-                    allowed_updates=[
-                        "message",
-                        "callback_query",
-                        "inline_query",
-                        "my_chat_member",
-                        "chat_member",
-                    ],
-                )
-            except asyncio.CancelledError:
-                logger.info("Bot polling cancelled.")
-            except Exception as e:
-                logger.error(f"Bot polling error: {e}")
-
-        bot_polling_task = asyncio.create_task(start_polling())
+        await bot_runtime.start()
+        bot_polling_task = bot_runtime.task
         contest_scheduler_task = asyncio.create_task(run_contest_scheduler(bot))
     else:
         logger.info("Bot token not configured or mock mode. Skipping bot polling.")
 
-    yield
-
-    # Shutdown
-    if contest_scheduler_task:
-        contest_scheduler_task.cancel()
-        try:
-            await contest_scheduler_task
-        except asyncio.CancelledError:
-            pass
-    if bot_polling_task:
-        bot_polling_task.cancel()
-        try:
-            await bot_polling_task
-        except asyncio.CancelledError:
-            pass
-    if bot:
-        await bot.session.close()
-    logger.info("Sakura Shop server shut down gracefully.")
+    try:
+        yield
+    finally:
+        if contest_scheduler_task:
+            contest_scheduler_task.cancel()
+            try:
+                await contest_scheduler_task
+            except asyncio.CancelledError:
+                pass
+        await bot_runtime.stop()
+        if bot:
+            await bot.session.close()
+        await engine.dispose()
+        bot_polling_task = contest_scheduler_task = None
+        logger.info("Sakura Shop server shut down gracefully.")
 
 
 app = FastAPI(
@@ -151,10 +137,21 @@ app.include_router(contest.admin_router, prefix="/api")
 
 
 # Health check
-@app.get("/api/health")
-@app.get("/health")
+@app.api_route("/health/live", methods=["GET", "HEAD"])
+async def liveness_check():
+    # Keep Render deployment readiness independent of Telegram's single poller.
+    return {"status": "alive"}
+
+
+@app.api_route("/api/health", methods=["GET", "HEAD"])
+@app.api_route("/health", methods=["GET", "HEAD"])
 async def health_check():
-    return {"status": "ok", "shop": "Sakura Shop 🌸", "version": "1.0.0"}
+    bot_state = bot_runtime.health()
+    return JSONResponse(
+        status_code=200 if bot_state["healthy"] else 503,
+        content={"status": "ok" if bot_state["healthy"] else "degraded",
+                 "shop": "Sakura Shop 🌸", "version": "1.0.0", "bot": bot_state},
+    )
 
 
 # Mount Static Frontend

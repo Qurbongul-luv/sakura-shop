@@ -17,6 +17,10 @@ class Settings(BaseSettings):
         default="http://localhost:8000",
         description="Base URL where the Mini App is served"
     )
+    BOT_POLLING_ENABLED: bool = Field(
+        default=True,
+        description="Disable on local API previews; use a separate bot token for local bot tests",
+    )
     DATABASE_URL: str = Field(
         default="sqlite+aiosqlite:///./sakura_shop.db",
         description="SQLAlchemy async database URL"
