@@ -32,6 +32,13 @@ import { formatPrice, getMediaUrl } from '../utils/format';
 import { haptic } from '../utils/telegram';
 import { Translations } from '../i18n';
 
+const PLACE_BADGES = ['🥇', '🥈', '🥉'];
+const placeBadge = (index: number): string => PLACE_BADGES[index] ?? '🏅';
+
+function contestPrizes(contest: Pick<Contest, 'prize_1' | 'prize_2' | 'prize_3' | 'prizes'>): string[] {
+  return contest.prizes?.length ? contest.prizes : [contest.prize_1, contest.prize_2, contest.prize_3];
+}
+
 interface AdminPageProps {
   products: Product[];
   categories: Category[];
@@ -1130,24 +1137,14 @@ export const AdminPage: React.FC<AdminPageProps> = ({
 
                 {/* Prizes Display */}
                 <div className="bg-sakura-blush/40 dark:bg-sakura-darkcardsoft/50 rounded-2xl p-3 my-2 space-y-1.5 text-xs">
-                  <div className="flex items-center justify-between">
-                    <span className="font-bold flex items-center gap-1.5">
-                      <span>🥇 1-o'rin:</span>
-                      <span className="text-sakura-rose font-black">{activeContest.prize_1}</span>
-                    </span>
-                  </div>
-                  <div className="flex items-center justify-between">
-                    <span className="font-bold flex items-center gap-1.5">
-                      <span>🥈 2-o'rin:</span>
-                      <span className="text-sakura-rose font-black">{activeContest.prize_2}</span>
-                    </span>
-                  </div>
-                  <div className="flex items-center justify-between">
-                    <span className="font-bold flex items-center gap-1.5">
-                      <span>🥉 3-o'rin:</span>
-                      <span className="text-sakura-rose font-black">{activeContest.prize_3}</span>
-                    </span>
-                  </div>
+                  {contestPrizes(activeContest).map((prize, index) => (
+                    <div key={index} className="flex items-center justify-between">
+                      <span className="font-bold flex items-center gap-1.5">
+                        <span>{placeBadge(index)} {index + 1}-o'rin:</span>
+                        <span className="text-sakura-rose font-black">{prize}</span>
+                      </span>
+                    </div>
+                  ))}
                   <button
                     onClick={() => setIsEditPrizesModalOpen(true)}
                     className="w-full mt-2 py-1.5 rounded-xl border border-sakura-pink/40 text-[11px] font-bold text-sakura-rose bg-white dark:bg-sakura-darkcard"
@@ -1349,9 +1346,9 @@ export const AdminPage: React.FC<AdminPageProps> = ({
                           <span className="text-[10px] uppercase font-bold text-sakura-plum/60">{hc.status}</span>
                         </div>
                         <div className="text-[10px] text-sakura-plum/70 space-y-0.5">
-                          <div>🥇 {hc.prize_1}</div>
-                          <div>🥈 {hc.prize_2}</div>
-                          <div>🥉 {hc.prize_3}</div>
+                          {contestPrizes(hc).map((prize, index) => (
+                            <div key={index}>{placeBadge(index)} {prize}</div>
+                          ))}
                         </div>
                       </div>
                     ))}

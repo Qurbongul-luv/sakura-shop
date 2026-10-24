@@ -16,9 +16,11 @@ from aiogram.types import (
 from sqlalchemy import select
 
 from api.config import settings
-from db.models import Admin, Contest, ContestReferral, User, Setting, utcnow
+from db.models import Admin, Contest, ContestReferral, User, Setting, utcnow, MAX_CONTEST_PRIZES
 from db.session import async_session_factory
 from bot.services.contest_service import (
+    format_prize_lines,
+    place_badge,
     get_active_contest,
     get_channel_info,
     build_contest_announcement_text,
@@ -38,6 +40,7 @@ class ContestWizard(StatesGroup):
     prize_1 = State()
     prize_2 = State()
     prize_3 = State()
+    extra_prizes = State()
     duration = State()
     photo = State()
     preview = State()
@@ -47,6 +50,58 @@ class ContestEditPrizes(StatesGroup):
     prize_1 = State()
     prize_2 = State()
     prize_3 = State()
+    extra_prizes = State()
+
+
+MAX_EXTRA_PRIZES = MAX_CONTEST_PRIZES - 3
+
+
+def extra_prizes_prompt(step_label: str, back_callback: str, skip_callback: str, skip_text: str):
+    text = (
+        f"{step_label}\n\n"
+        f"🏅 <b>Qo'shimcha o'rinlar (4-o'rindan boshlab, ko'pi bilan {MAX_EXTRA_PRIZES} ta):</b>\n"
+        "Har bir sovg'ani <b>yangi qatorda</b> yozing, tartibi o'rinlar tartibi bo'ladi. Masalan:\n"
+        "<code>Brelok\n30% chegirma\nTg gift\nTg gift</code>"
+    )
+    markup = InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text=skip_text, callback_data=skip_callback)],
+            [InlineKeyboardButton(text="⬅️ Orqaga", callback_data=back_callback)],
+            [InlineKeyboardButton(text="❌ Bekor qilish", callback_data="adm_c_cancel_wizard")],
+        ]
+    )
+    return text, markup
+
+
+def parse_extra_prizes(raw: Optional[str]) -> Optional[list]:
+    """One prize per line; None for non-text input or more lines than places allowed."""
+    prizes = [line.strip() for line in (raw or "").splitlines() if line.strip()]
+    if not prizes or len(prizes) > MAX_EXTRA_PRIZES or any(len(p) > 255 for p in prizes):
+        return None
+    return prizes
+
+
+def duration_prompt():
+    text = (
+        "🌸 <b>YANGI KONKURS YARATISH (5/6)</b>\n\n"
+        "⏳ <b>Konkurs davomiyligini tanlang:</b>\n"
+        "Tugmalar orqali tanlang yoki maxsus sana kiriting:\n(Masalan: <code>2026-10-30 20:00</code>)"
+    )
+    markup = InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(text="1 hafta (7 kun)", callback_data="adm_c_dur:7"),
+                InlineKeyboardButton(text="2 hafta (14 kun)", callback_data="adm_c_dur:14"),
+            ],
+            [
+                InlineKeyboardButton(text="3 kun", callback_data="adm_c_dur:3"),
+                InlineKeyboardButton(text="1 oy (30 kun)", callback_data="adm_c_dur:30"),
+            ],
+            [InlineKeyboardButton(text="⬅️ Orqaga", callback_data="adm_c_back_to_extra")],
+            [InlineKeyboardButton(text="❌ Bekor qilish", callback_data="adm_c_cancel_wizard")],
+        ]
+    )
+    return text, markup
 
 
 class ContestExtendState(StatesGroup):
@@ -107,9 +162,7 @@ async def handle_admin_contest_menu(call: CallbackQuery, state: FSMContext):
 
             text = (
                 "🎁 <b>FAOL SAKURA KONKURS BOSHQARUVI</b>\n\n"
-                f"🥇 1-o'rin: {escape(active.prize_1)}\n"
-                f"🥈 2-o'rin: {escape(active.prize_2)}\n"
-                f"🥉 3-o'rin: {escape(active.prize_3)}\n\n"
+                f"{format_prize_lines(active.prizes)}\n\n"
                 f"⏳ <b>Tugash:</b> {ends_str}\n"
                 f"📌 <b>Holat:</b> {active.status.upper()}\n\n"
                 "📊 <b>Hozirgi yetakchilar:</b>\n" + "\n".join(top_lines)
@@ -174,7 +227,7 @@ async def start_contest_wizard(call: CallbackQuery, state: FSMContext):
 
     await state.set_state(ContestWizard.prize_1)
     await call.message.edit_text(
-        "🌸 <b>YANGI KONKURS YARATISH (1/5)</b>\n\n"
+        "🌸 <b>YANGI KONKURS YARATISH (1/6)</b>\n\n"
         "🥇 <b>1-o'rin sovg'asini kiriting:</b>\n"
         "(Masalan: <i>Vintage pushti jempir + Lolita parik</i>)",
         reply_markup=InlineKeyboardMarkup(
@@ -202,7 +255,7 @@ async def process_prize_1(message: Message, state: FSMContext):
     await state.update_data(prize_1=prize_text)
     await state.set_state(ContestWizard.prize_2)
     await message.answer(
-        "🌸 <b>YANGI KONKURS YARATISH (2/5)</b>\n\n"
+        "🌸 <b>YANGI KONKURS YARATISH (2/6)</b>\n\n"
         "🥈 <b>2-o'rin sovg'asini kiriting:</b>\n"
         "(Masalan: <i>Lolita parik (wig)</i>)",
         reply_markup=InlineKeyboardMarkup(
@@ -218,7 +271,7 @@ async def process_prize_1(message: Message, state: FSMContext):
 async def back_to_p1(call: CallbackQuery, state: FSMContext):
     await state.set_state(ContestWizard.prize_1)
     await call.message.edit_text(
-        "🌸 <b>YANGI KONKURS YARATISH (1/5)</b>\n\n"
+        "🌸 <b>YANGI KONKURS YARATISH (1/6)</b>\n\n"
         "🥇 <b>1-o'rin sovg'asini kiriting:</b>",
         reply_markup=InlineKeyboardMarkup(
             inline_keyboard=[
@@ -239,7 +292,7 @@ async def process_prize_2(message: Message, state: FSMContext):
     await state.update_data(prize_2=prize_text)
     await state.set_state(ContestWizard.prize_3)
     await message.answer(
-        "🌸 <b>YANGI KONKURS YARATISH (3/5)</b>\n\n"
+        "🌸 <b>YANGI KONKURS YARATISH (3/6)</b>\n\n"
         "🥉 <b>3-o'rin sovg'asini kiriting:</b>\n"
         "(Masalan: <i>Iliq yulduzli shoyi sharf</i>)",
         reply_markup=InlineKeyboardMarkup(
@@ -255,7 +308,7 @@ async def process_prize_2(message: Message, state: FSMContext):
 async def back_to_p2(call: CallbackQuery, state: FSMContext):
     await state.set_state(ContestWizard.prize_2)
     await call.message.edit_text(
-        "🌸 <b>YANGI KONKURS YARATISH (2/5)</b>\n\n"
+        "🌸 <b>YANGI KONKURS YARATISH (2/6)</b>\n\n"
         "🥈 <b>2-o'rin sovg'asini kiriting:</b>",
         reply_markup=InlineKeyboardMarkup(
             inline_keyboard=[
@@ -275,33 +328,52 @@ async def process_prize_3(message: Message, state: FSMContext):
         return
 
     await state.update_data(prize_3=prize_text)
-    await state.set_state(ContestWizard.duration)
-    await message.answer(
-        "🌸 <b>YANGI KONKURS YARATISH (4/5)</b>\n\n"
-        "⏳ <b>Konkurs davomiyligini tanlang:</b>\n"
-        "Tugmalar orqali tanlang yoki maxsus sana kiriting:\n(Masalan: <code>2026-10-30 20:00</code>)",
-        reply_markup=InlineKeyboardMarkup(
-            inline_keyboard=[
-                [
-                    InlineKeyboardButton(text="1 hafta (7 kun)", callback_data="adm_c_dur:7"),
-                    InlineKeyboardButton(text="2 hafta (14 kun)", callback_data="adm_c_dur:14"),
-                ],
-                [
-                    InlineKeyboardButton(text="3 kun", callback_data="adm_c_dur:3"),
-                    InlineKeyboardButton(text="1 oy (30 kun)", callback_data="adm_c_dur:30"),
-                ],
-                [InlineKeyboardButton(text="⬅️ Orqaga", callback_data="adm_c_back_to_p3")],
-                [InlineKeyboardButton(text="❌ Bekor qilish", callback_data="adm_c_cancel_wizard")],
-            ]
-        )
+    await state.set_state(ContestWizard.extra_prizes)
+    text, markup = extra_prizes_prompt(
+        "🌸 <b>YANGI KONKURS YARATISH (4/6)</b>", "adm_c_back_to_p3", "adm_c_skip_extra", "➡️ Faqat 3 ta o'rin"
     )
+    await message.answer(text, reply_markup=markup)
+
+
+@router.message(ContestWizard.extra_prizes)
+async def process_extra_prizes(message: Message, state: FSMContext):
+    extra = parse_extra_prizes(message.text)
+    if extra is None:
+        await message.answer(
+            f"⚠️ Sovg'alarni matn ko'rinishida, har birini yangi qatorda yozing: ko'pi bilan {MAX_EXTRA_PRIZES} ta "
+            f"(jami {MAX_CONTEST_PRIZES} ta o'rin). Qayta yozing yoki tugmani bosing:"
+        )
+        return
+    await state.update_data(extra_prizes=extra)
+    await state.set_state(ContestWizard.duration)
+    text, markup = duration_prompt()
+    await message.answer(text, reply_markup=markup)
+
+
+@router.callback_query(F.data == "adm_c_skip_extra")
+async def skip_extra_prizes(call: CallbackQuery, state: FSMContext):
+    await state.update_data(extra_prizes=[])
+    await state.set_state(ContestWizard.duration)
+    text, markup = duration_prompt()
+    await call.message.edit_text(text, reply_markup=markup)
+    await call.answer()
+
+
+@router.callback_query(F.data == "adm_c_back_to_extra")
+async def back_to_extra(call: CallbackQuery, state: FSMContext):
+    await state.set_state(ContestWizard.extra_prizes)
+    text, markup = extra_prizes_prompt(
+        "🌸 <b>YANGI KONKURS YARATISH (4/6)</b>", "adm_c_back_to_p3", "adm_c_skip_extra", "➡️ Faqat 3 ta o'rin"
+    )
+    await call.message.edit_text(text, reply_markup=markup)
+    await call.answer()
 
 
 @router.callback_query(F.data == "adm_c_back_to_p3")
 async def back_to_p3(call: CallbackQuery, state: FSMContext):
     await state.set_state(ContestWizard.prize_3)
     await call.message.edit_text(
-        "🌸 <b>YANGI KONKURS YARATISH (3/5)</b>\n\n"
+        "🌸 <b>YANGI KONKURS YARATISH (3/6)</b>\n\n"
         "🥉 <b>3-o'rin sovg'asini kiriting:</b>",
         reply_markup=InlineKeyboardMarkup(
             inline_keyboard=[
@@ -321,7 +393,7 @@ async def process_duration_callback(call: CallbackQuery, state: FSMContext):
     await state.set_state(ContestWizard.photo)
 
     await call.message.edit_text(
-        "🌸 <b>YANGI KONKURS YARATISH (5/5)</b>\n\n"
+        "🌸 <b>YANGI KONKURS YARATISH (6/6)</b>\n\n"
         "🖼 <b>Konkurs e'loni uchun rasm yuborasizmi?</b>\n"
         "(Kanalga joylanadigan rasm yuboring yoki o'tkazib yuborish tugmasini bosing):",
         reply_markup=InlineKeyboardMarkup(
@@ -351,7 +423,7 @@ async def process_custom_duration(message: Message, state: FSMContext):
         await state.update_data(ends_at_iso=ends_at.isoformat())
         await state.set_state(ContestWizard.photo)
         await message.answer(
-            "🌸 <b>YANGI KONKURS YARATISH (5/5)</b>\n\n"
+            "🌸 <b>YANGI KONKURS YARATISH (6/6)</b>\n\n"
             "🖼 <b>Konkurs e'loni uchun rasm yuborasizmi?</b>",
             reply_markup=InlineKeyboardMarkup(
                 inline_keyboard=[
@@ -370,24 +442,8 @@ async def process_custom_duration(message: Message, state: FSMContext):
 @router.callback_query(F.data == "adm_c_back_to_dur")
 async def back_to_dur(call: CallbackQuery, state: FSMContext):
     await state.set_state(ContestWizard.duration)
-    await call.message.edit_text(
-        "🌸 <b>YANGI KONKURS YARATISH (4/5)</b>\n\n"
-        "⏳ <b>Konkurs davomiyligini tanlang:</b>",
-        reply_markup=InlineKeyboardMarkup(
-            inline_keyboard=[
-                [
-                    InlineKeyboardButton(text="1 hafta (7 kun)", callback_data="adm_c_dur:7"),
-                    InlineKeyboardButton(text="2 hafta (14 kun)", callback_data="adm_c_dur:14"),
-                ],
-                [
-                    InlineKeyboardButton(text="3 kun", callback_data="adm_c_dur:3"),
-                    InlineKeyboardButton(text="1 oy (30 kun)", callback_data="adm_c_dur:30"),
-                ],
-                [InlineKeyboardButton(text="⬅️ Orqaga", callback_data="adm_c_back_to_p3")],
-                [InlineKeyboardButton(text="❌ Bekor qilish", callback_data="adm_c_cancel_wizard")],
-            ]
-        )
-    )
+    text, markup = duration_prompt()
+    await call.message.edit_text(text, reply_markup=markup)
     await call.answer()
 
 
@@ -407,9 +463,7 @@ async def skip_photo_input(call: CallbackQuery, state: FSMContext):
 
 async def show_contest_preview(target: Message, state: FSMContext):
     data = await state.get_data()
-    p1 = data.get("prize_1")
-    p2 = data.get("prize_2")
-    p3 = data.get("prize_3")
+    prizes = [data.get("prize_1"), data.get("prize_2"), data.get("prize_3"), *data.get("extra_prizes", [])]
     ends_at = datetime.fromisoformat(data.get("ends_at_iso"))
     photo_file_id = data.get("photo_file_id")
 
@@ -418,9 +472,7 @@ async def show_contest_preview(target: Message, state: FSMContext):
     preview_text = (
         "👀 <b>KANALDA CHIQADIGAN POST PREVIEW:</b>\n\n"
         "🌸 <b>SAKURA KONKURS</b> 🌸\n\n"
-        f"🥇 <b>1-o'rin:</b> {p1}\n"
-        f"🥈 <b>2-o'rin:</b> {p2}\n"
-        f"🥉 <b>3-o'rin:</b> {p3}\n\n"
+        f"{format_prize_lines(prizes)}\n\n"
         "📌 <b>Shartlar:</b>\n"
         "1. Botga kiring va shaxsiy havolangizni oling\n"
         "2. Do'stlaringizni taklif qiling\n"
@@ -474,6 +526,7 @@ async def launch_contest_confirm(call: CallbackQuery, state: FSMContext):
             prize_1=p1,
             prize_2=p2,
             prize_3=p3,
+            extra_prizes=data.get("extra_prizes", []),
             photo_file_id=photo_file_id,
             status="active",
             only_new_subscribers=True,
@@ -607,7 +660,7 @@ async def handle_edit_prizes_start(call: CallbackQuery, state: FSMContext):
     await state.set_state(ContestEditPrizes.prize_1)
 
     await call.message.edit_text(
-        "✏️ <b>SOVG'ALARNI TAHRIRLASH (1/3)</b>\n\n"
+        "✏️ <b>SOVG'ALARNI TAHRIRLASH (1/4)</b>\n\n"
         "🥇 Yangi 1-o'rin sovg'asini kiriting:",
         reply_markup=InlineKeyboardMarkup(
             inline_keyboard=[
@@ -623,7 +676,7 @@ async def process_edit_p1(message: Message, state: FSMContext):
     await state.update_data(p1=message.text.strip())
     await state.set_state(ContestEditPrizes.prize_2)
     await message.answer(
-        "✏️ <b>SOVG'ALARNI TAHRIRLASH (2/3)</b>\n\n"
+        "✏️ <b>SOVG'ALARNI TAHRIRLASH (2/4)</b>\n\n"
         "🥈 Yangi 2-o'rin sovg'asini kiriting:"
     )
 
@@ -633,18 +686,44 @@ async def process_edit_p2(message: Message, state: FSMContext):
     await state.update_data(p2=message.text.strip())
     await state.set_state(ContestEditPrizes.prize_3)
     await message.answer(
-        "✏️ <b>SOVG'ALARNI TAHRIRLASH (3/3)</b>\n\n"
+        "✏️ <b>SOVG'ALARNI TAHRIRLASH (3/4)</b>\n\n"
         "🥉 Yangi 3-o'rin sovg'asini kiriting:"
     )
 
 
 @router.message(ContestEditPrizes.prize_3)
 async def process_edit_p3(message: Message, state: FSMContext):
-    p3 = message.text.strip()
+    await state.update_data(p3=message.text.strip())
+    await state.set_state(ContestEditPrizes.extra_prizes)
+    text, markup = extra_prizes_prompt(
+        "✏️ <b>SOVG'ALARNI TAHRIRLASH (4/4)</b>", "admin_contest_menu", "adm_c_edit_keep_extra",
+        "➡️ 4+ o'rinlarni o'zgartirmaslik",
+    )
+    await message.answer(text, reply_markup=markup)
+
+
+@router.message(ContestEditPrizes.extra_prizes)
+async def process_edit_extra(message: Message, state: FSMContext):
+    extra = parse_extra_prizes(message.text)
+    if extra is None:
+        await message.answer(
+            f"⚠️ Sovg'alarni matn ko'rinishida, har birini yangi qatorda yozing: ko'pi bilan {MAX_EXTRA_PRIZES} ta. "
+            "Qayta yozing yoki tugmani bosing:"
+        )
+        return
+    await save_edited_prizes(message, state, extra)
+
+
+@router.callback_query(F.data == "adm_c_edit_keep_extra")
+async def keep_edit_extra(call: CallbackQuery, state: FSMContext):
+    await save_edited_prizes(call.message, state, None)
+    await call.answer()
+
+
+async def save_edited_prizes(message: Message, state: FSMContext, extra: Optional[list]):
+    """extra=None keeps places 4+ as they are."""
     data = await state.get_data()
     contest_id = data.get("contest_id")
-    p1 = data.get("p1")
-    p2 = data.get("p2")
 
     bot = message.bot
 
@@ -652,9 +731,11 @@ async def process_edit_p3(message: Message, state: FSMContext):
         res = await session.execute(select(Contest).where(Contest.id == contest_id))
         c = res.scalars().first()
         if c:
-            c.prize_1 = p1
-            c.prize_2 = p2
-            c.prize_3 = p3
+            c.prize_1 = data.get("p1")
+            c.prize_2 = data.get("p2")
+            c.prize_3 = data.get("p3")
+            if extra is not None:
+                c.extra_prizes = extra
             await session.commit()
 
             # Edit channel post if exists
@@ -880,10 +961,9 @@ async def handle_results_approve(call: CallbackQuery):
         f"Kanalga jami <b>+{tot}</b> yangi faol obunachilar qo'shildi! 🚀\n",
         "<b>G'oliblar ro'yxati:</b>"
     ]
-    medals = {1: "🥇", 2: "🥈", 3: "🥉"}
     for w in winners:
         tag = f"@{w['username']}" if w["username"] else escape(w["name"])
-        lines.append(f"{medals.get(w['rank'], '•')} {w['rank']}-o'rin: {tag} — {w['score']} ta do'st")
+        lines.append(f"{place_badge(w['rank'])} {w['rank']}-o'rin: {tag} — {w['score']} ta do'st")
 
     lines.append("\nG'oliblarga shaxsiy tabrik xabarlari yuborildi.")
     await call.message.edit_text(

@@ -24,6 +24,19 @@ interface ContestPageProps {
   onExploreProducts: () => void;
 }
 
+interface PlaceStyle {
+  badge: string;
+  border: string;
+  label: string;
+}
+
+const PLACE_STYLES: PlaceStyle[] = [
+  { badge: '🥇', border: 'border-amber-200/50', label: 'text-amber-600' },
+  { badge: '🥈', border: 'border-slate-200/50', label: 'text-slate-500' },
+  { badge: '🥉', border: 'border-amber-700/20', label: 'text-amber-700' },
+];
+const DEFAULT_PLACE_STYLE: PlaceStyle = { badge: '🏅', border: 'border-sakura-pink/30', label: 'text-sakura-rose' };
+
 export const ContestPage: React.FC<ContestPageProps> = ({
   initData,
   t,
@@ -105,7 +118,7 @@ export const ContestPage: React.FC<ContestPageProps> = ({
   const handleShareLink = () => {
     if (!stats?.invite_link || !stats?.contest) return;
     haptic.impact('medium');
-    const shareText = `🌸 Sakura shop do'konining go'zal konkursida qatnashing va ajoyib sovg'alarni yutib oling! ✨\n🎁 Sovg'alar: ${stats.contest.prize_1}, ${stats.contest.prize_2}\n\nQatnashish uchun: ${stats.invite_link}`;
+    const shareText = `🌸 Sakura shop do'konining go'zal konkursida qatnashing va ajoyib sovg'alarni yutib oling! ✨\n🎁 Sovg'alar: ${(stats.contest.prizes ?? [stats.contest.prize_1, stats.contest.prize_2]).join(', ')}\n\nQatnashish uchun: ${stats.invite_link}`;
     const url = `https://t.me/share/url?url=${encodeURIComponent(stats.invite_link)}&text=${encodeURIComponent(shareText)}`;
     openTelegramLink(url);
   };
@@ -136,6 +149,7 @@ export const ContestPage: React.FC<ContestPageProps> = ({
   }
 
   const contest = stats.contest;
+  const prizes = contest.prizes?.length ? contest.prizes : [contest.prize_1, contest.prize_2, contest.prize_3];
   const rank = stats.rank;
   const score = stats.score;
   const nextRankScore = stats.next_rank_score;
@@ -162,35 +176,23 @@ export const ContestPage: React.FC<ContestPageProps> = ({
 
         {/* Prizes Cards */}
         <div className="mt-3 space-y-2">
-          <div className="flex items-center gap-3 p-3 rounded-2xl bg-white/80 dark:bg-sakura-darkcardsoft backdrop-blur-sm border border-amber-200/50 shadow-xs">
-            <span className="text-2xl">🥇</span>
-            <div className="flex-1 min-w-0">
-              <span className="text-[10px] font-extrabold text-amber-600 block uppercase">1-o'rin</span>
-              <p className="text-xs font-bold text-sakura-plum dark:text-white truncate">
-                {contest.prize_1}
-              </p>
-            </div>
-          </div>
-
-          <div className="flex items-center gap-3 p-2.5 rounded-2xl bg-white/70 dark:bg-sakura-darkcardsoft/80 backdrop-blur-sm border border-slate-200/50 shadow-xs">
-            <span className="text-2xl">🥈</span>
-            <div className="flex-1 min-w-0">
-              <span className="text-[10px] font-extrabold text-slate-500 block uppercase">2-o'rin</span>
-              <p className="text-xs font-bold text-sakura-plum dark:text-white truncate">
-                {contest.prize_2}
-              </p>
-            </div>
-          </div>
-
-          <div className="flex items-center gap-3 p-2.5 rounded-2xl bg-white/70 dark:bg-sakura-darkcardsoft/80 backdrop-blur-sm border border-amber-700/20 shadow-xs">
-            <span className="text-2xl">🥉</span>
-            <div className="flex-1 min-w-0">
-              <span className="text-[10px] font-extrabold text-amber-700 block uppercase">3-o'rin</span>
-              <p className="text-xs font-bold text-sakura-plum dark:text-white truncate">
-                {contest.prize_3}
-              </p>
-            </div>
-          </div>
+          {prizes.map((prize, index) => {
+            const style = PLACE_STYLES[index] ?? DEFAULT_PLACE_STYLE;
+            return (
+              <div
+                key={index}
+                className={`flex items-center gap-3 ${index === 0 ? 'p-3 bg-white/80' : 'p-2.5 bg-white/70'} rounded-2xl dark:bg-sakura-darkcardsoft backdrop-blur-sm border ${style.border} shadow-xs`}
+              >
+                <span className="text-2xl">{style.badge}</span>
+                <div className="flex-1 min-w-0">
+                  <span className={`text-[10px] font-extrabold ${style.label} block uppercase`}>
+                    {index + 1}-o'rin
+                  </span>
+                  <p className="text-xs font-bold text-sakura-plum dark:text-white truncate">{prize}</p>
+                </div>
+              </div>
+            );
+          })}
         </div>
 
         {/* Countdown Timer */}

@@ -1,4 +1,5 @@
 from typing import AsyncGenerator
+from sqlalchemy import inspect, text
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
 from api.config import settings
 from db.models import Base
@@ -47,6 +48,14 @@ async def get_db() -> AsyncGenerator[AsyncSession, None]:
             await session.close()
 
 
+def _add_missing_columns(sync_conn) -> None:
+    # create_all never alters existing tables; add columns introduced after the first deploy.
+    existing = {col["name"] for col in inspect(sync_conn).get_columns("contests")}
+    if "extra_prizes" not in existing:
+        sync_conn.execute(text("ALTER TABLE contests ADD COLUMN extra_prizes JSON"))
+
+
 async def init_db() -> None:
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
+        await conn.run_sync(_add_missing_columns)

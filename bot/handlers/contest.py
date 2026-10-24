@@ -23,6 +23,8 @@ from bot.services.contest_service import (
     format_tashkent_datetime,
     compute_leaderboard,
     to_tashkent_tz,
+    format_prize_lines,
+    place_badge,
 )
 
 logger = logging.getLogger(__name__)
@@ -32,7 +34,6 @@ NO_ACTIVE_CONTEST_TEXT = (
     "🌸 <b>Hozircha faol konkurs yo'q</b> 🎀\n\n"
     "Tez orada yangi sovg'ali tanlov e'lon qilinadi. Do'konimiz va kanalimizni kuzatib boring! ✨"
 )
-MEDALS = {1: "🥇", 2: "🥈", 3: "🥉"}
 TOP_N = 10
 
 
@@ -53,9 +54,11 @@ async def build_leaderboard_view(
     if contest is None or contest.status != "active":
         lines.append("<i>Bu konkurs yakunlangan.</i>\n")
 
+    prize_places = len(contest.prizes) if contest else 3
     if board:
         for entry in board[:TOP_N]:
-            medal = MEDALS.get(entry["rank"], f"<b>{entry['rank']}.</b>")
+            # Badge marks every place that currently wins a prize; the rest are plain numbers.
+            medal = place_badge(entry["rank"]) if entry["rank"] <= prize_places else f"<b>{entry['rank']}.</b>"
             tag = f"@{entry['username']}" if entry["username"] else escape(entry["name"])
             you = " ⬅️ <i>siz</i>" if entry["user_id"] == viewer_id else ""
             lines.append(f"{medal} {tag} — <b>{entry['score']}</b> ball{you}")
@@ -127,7 +130,7 @@ async def show_user_contest_dashboard(target: Message, user_id: int, show_prize_
         # Share text
         share_text = (
             f"🌸 Sakura shop do'konining go'zal konkursida qatnashib, ajoyib sovg'alarni yutib oling! ✨\n"
-            f"Sovg'alar: {escape(c['prize_1'])}, {escape(c['prize_2'])}, {escape(c['prize_3'])} 🎀\n\n"
+            f"Sovg'alar: {', '.join(c['prizes'])} 🎀\n\n"  # plain text for the share URL, not HTML
             f"Qatnashish uchun bosing: {link}"
         )
         share_url = f"https://t.me/share/url?url={urllib.parse.quote(link)}&text={urllib.parse.quote(share_text)}"
@@ -149,9 +152,7 @@ async def show_user_contest_dashboard(target: Message, user_id: int, show_prize_
 
         text = (
             "🌸 <b>SAKURA REFERRAL KONKURS</b> 🎁\n\n"
-            f"🥇 <b>1-o'rin:</b> {escape(c['prize_1'])}\n"
-            f"🥈 <b>2-o'rin:</b> {escape(c['prize_2'])}\n"
-            f"🥉 <b>3-o'rin:</b> {escape(c['prize_3'])}\n\n"
+            f"{format_prize_lines(c['prizes'])}\n\n"
             f"⏳ <b>Tugash vaqti:</b> {c['formatted_ends_at']}\n\n"
             f"📊 <b>Ballingiz:</b> {score} ta do'st\n"
             f"📍 {rank_str}\n\n"

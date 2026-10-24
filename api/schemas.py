@@ -1,6 +1,6 @@
 from datetime import datetime
-from typing import List, Optional, Any, Dict
-from pydantic import BaseModel, Field, ConfigDict, field_validator
+from typing import Annotated, List, Optional, Any, Dict
+from pydantic import BaseModel, Field, ConfigDict, StringConstraints, field_validator
 
 
 # ==================== PRODUCT SCHEMAS ====================
@@ -191,10 +191,16 @@ class BroadcastCreate(BaseModel):
 
 
 # ==================== CONTEST SCHEMAS ====================
+PrizeText = Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=255)]
+# Places 4..7; the first three keep their own fields.
+ExtraPrizes = Annotated[List[PrizeText], Field(max_length=4)]
+
+
 class ContestCreate(BaseModel):
     prize_1: str = Field(..., min_length=1, max_length=255)
     prize_2: str = Field(..., min_length=1, max_length=255)
     prize_3: str = Field(..., min_length=1, max_length=255)
+    extra_prizes: ExtraPrizes = Field(default_factory=list)
     ends_at: datetime
     photo_file_id: Optional[str] = None
     only_new_subscribers: bool = True
@@ -204,6 +210,7 @@ class ContestUpdatePrizes(BaseModel):
     prize_1: str = Field(..., min_length=1, max_length=255)
     prize_2: str = Field(..., min_length=1, max_length=255)
     prize_3: str = Field(..., min_length=1, max_length=255)
+    extra_prizes: Optional[ExtraPrizes] = None  # None keeps places 4+ unchanged
 
 
 class ContestExtend(BaseModel):
@@ -216,6 +223,7 @@ class ContestOut(BaseModel):
     prize_1: str
     prize_2: str
     prize_3: str
+    prizes: List[str] = Field(default_factory=list)
     photo_file_id: Optional[str] = None
     channel_message_id: Optional[int] = None
     status: str

@@ -71,14 +71,24 @@ async def get_active_contest(session: AsyncSession) -> Optional[Contest]:
     return res.scalars().first()
 
 
+def place_badge(place: int) -> str:
+    return {1: "🥇", 2: "🥈", 3: "🥉"}.get(place, "🏅")
+
+
+def format_prize_lines(prizes: List[str]) -> str:
+    """One HTML line per awarded place: '🥇 <b>1-o'rin:</b> Jeans pants'."""
+    return "\n".join(
+        f"{place_badge(place)} <b>{place}-o'rin:</b> {escape(prize)}"
+        for place, prize in enumerate(prizes, start=1)
+    )
+
+
 def build_contest_announcement_text(contest: Contest) -> str:
     """Builds cute channel announcement text matching channel vibe."""
     ends_str = format_tashkent_datetime(contest.ends_at)
     return (
         "🌸 <b>SAKURA KONKURS</b> 🌸\n\n"
-        f"🥇 <b>1-o'rin:</b> {escape(contest.prize_1)}\n"
-        f"🥈 <b>2-o'rin:</b> {escape(contest.prize_2)}\n"
-        f"🥉 <b>3-o'rin:</b> {escape(contest.prize_3)}\n\n"
+        f"{format_prize_lines(contest.prizes)}\n\n"
         "📌 <b>Shartlar:</b>\n"
         "1. Botga kiring va shaxsiy havolangizni oling\n"
         "2. Do'stlaringizni taklif qiling\n"
@@ -533,6 +543,7 @@ async def get_user_contest_info(
         "prize_1": active.prize_1,
         "prize_2": active.prize_2,
         "prize_3": active.prize_3,
+        "prizes": active.prizes,
         "photo_file_id": active.photo_file_id,
         "channel_message_id": active.channel_message_id,
         "status": active.status,
@@ -677,9 +688,10 @@ async def approve_and_announce_winners(
         }
     await session.refresh(contest)
 
-    leaderboard = await compute_leaderboard(session, contest_id, limit=3)
+    prizes = contest.prizes
+    leaderboard = await compute_leaderboard(session, contest_id, limit=len(prizes))
     # Filter out zero scores: A score of 0 never wins!
-    winners = [entry for entry in leaderboard if entry["score"] > 0][:3]
+    winners = [entry for entry in leaderboard if entry["score"] > 0][: len(prizes)]
 
     winners_clean = []
     for w in winners:
@@ -707,12 +719,13 @@ async def approve_and_announce_winners(
 
     # Post channel announcement
     if channel_id and bot and winners:
-        medals = {1: "🥇", 2: "🥈", 3: "🥉"}
         lines = ["🌸 <b>SAKURA KONKURS G'OLIBLARI!</b> 🏆\n"]
         for w in winners:
-            medal = medals.get(w["rank"], "🎖")
             tag = f"@{w['username']}" if w["username"] else escape(w["name"])
-            lines.append(f"{medal} <b>{w['rank']}-o'rin:</b> {tag} — {w['score']} ta do'st")
+            lines.append(
+                f"{place_badge(w['rank'])} <b>{w['rank']}-o'rin:</b> {tag} — {w['score']} ta do'st "
+                f"({escape(prizes[w['rank'] - 1])})"
+            )
 
         lines.append("\nBarcha ishtirokchilarga katta rahmat! 💗✨")
         lines.append(f"Sovg'alarni olish uchun @{contact_username} ga yozing 💌")
@@ -729,6 +742,7 @@ async def approve_and_announce_winners(
             try:
                 dm_text = (
                     f"Tabriklaymiz! 🎉 Siz Sakura shop konkursida <b>{w['rank']}-o'rin</b>ni egalladingiz! 🌸\n"
+                    f"🎁 Sovg'angiz: <b>{escape(prizes[w['rank'] - 1])}</b>\n"
                     f"Natijangiz: <b>{w['score']}</b> ta taklif qilingan do'st.\n\n"
                     f"Sovg'angizni qabul qilish uchun do'kon egamiz @{contact_username} ga yozing 💌"
                 )

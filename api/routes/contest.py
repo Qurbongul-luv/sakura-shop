@@ -52,6 +52,7 @@ async def get_active_contest_info(db: AsyncSession = Depends(get_db)) -> Dict[st
             prize_1=active.prize_1,
             prize_2=active.prize_2,
             prize_3=active.prize_3,
+            prizes=active.prizes,
             photo_file_id=active.photo_file_id,
             channel_message_id=active.channel_message_id,
             status=active.status,
@@ -120,6 +121,7 @@ async def create_contest(
         prize_1=payload.prize_1,
         prize_2=payload.prize_2,
         prize_3=payload.prize_3,
+        extra_prizes=payload.extra_prizes,
         photo_file_id=payload.photo_file_id,
         ends_at=payload.ends_at,
         only_new_subscribers=payload.only_new_subscribers,
@@ -161,6 +163,7 @@ async def create_contest(
         prize_1=new_c.prize_1,
         prize_2=new_c.prize_2,
         prize_3=new_c.prize_3,
+        prizes=new_c.prizes,
         photo_file_id=new_c.photo_file_id,
         channel_message_id=new_c.channel_message_id,
         status=new_c.status,
@@ -186,6 +189,8 @@ async def update_contest_prizes(
     active.prize_1 = payload.prize_1
     active.prize_2 = payload.prize_2
     active.prize_3 = payload.prize_3
+    if payload.extra_prizes is not None:
+        active.extra_prizes = payload.extra_prizes
     await db.commit()
 
     channel_id, channel_url = await get_channel_info(db)
@@ -204,6 +209,7 @@ async def update_contest_prizes(
         prize_1=active.prize_1,
         prize_2=active.prize_2,
         prize_3=active.prize_3,
+        prizes=active.prizes,
         photo_file_id=active.photo_file_id,
         channel_message_id=active.channel_message_id,
         status=active.status,
@@ -241,6 +247,7 @@ async def extend_contest(
         prize_1=active.prize_1,
         prize_2=active.prize_2,
         prize_3=active.prize_3,
+        prizes=active.prizes,
         photo_file_id=active.photo_file_id,
         channel_message_id=active.channel_message_id,
         status=active.status,
@@ -400,6 +407,7 @@ async def get_contests_history(
             "prize_1": c.prize_1,
             "prize_2": c.prize_2,
             "prize_3": c.prize_3,
+            "prizes": c.prizes,
             "status": c.status,
             "created_at": c.created_at,
             "ends_at": c.ends_at,

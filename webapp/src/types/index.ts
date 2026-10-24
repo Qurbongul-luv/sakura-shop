@@ -126,6 +126,8 @@ export interface Contest {
   prize_1: string;
   prize_2: string;
   prize_3: string;
+  /** Every awarded place in order (1st..7th); older API responses may omit it. */
+  prizes?: string[];
   photo_file_id?: string | null;
   channel_message_id?: number | null;
   status: string;

@@ -134,6 +134,9 @@ class Setting(Base):
     value = Column(Text, nullable=False)
 
 
+MAX_CONTEST_PRIZES = 7
+
+
 class Contest(Base):
     __tablename__ = "contests"
 
@@ -141,6 +144,8 @@ class Contest(Base):
     prize_1 = Column(String(255), nullable=False)
     prize_2 = Column(String(255), nullable=False)
     prize_3 = Column(String(255), nullable=False)
+    # Places 4..MAX_CONTEST_PRIZES, in order; NULL on contests created before this column existed.
+    extra_prizes = Column(JSON, nullable=True)
     photo_file_id = Column(String(255), nullable=True)
     channel_message_id = Column(BigInteger, nullable=True)
     status = Column(String(50), default="active", nullable=False, index=True)  # active, pending_approval, completed, cancelled
@@ -152,6 +157,11 @@ class Contest(Base):
     ends_at = Column(DateTime(timezone=True), nullable=False, index=True)
 
     referrals = relationship("ContestReferral", back_populates="contest", cascade="all, delete-orphan")
+
+    @property
+    def prizes(self) -> list:
+        """Prize text for every awarded place, index 0 = 1st place."""
+        return [self.prize_1, self.prize_2, self.prize_3, *(self.extra_prizes or [])]
 
 
 class ContestReferral(Base):

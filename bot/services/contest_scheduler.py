@@ -12,6 +12,8 @@ from bot.services.contest_service import (
     compute_leaderboard,
     send_pending_reminders,
     ensure_utc,
+    format_prize_lines,
+    place_badge,
 )
 
 logger = logging.getLogger(__name__)
@@ -26,8 +28,9 @@ async def notify_owner_contest_ended(bot: Bot, contest_id: int, session_factory=
         if not contest:
             return
 
-        leaderboard = await compute_leaderboard(session, contest_id, limit=3)
-        winners = [w for w in leaderboard if w["score"] > 0][:3]
+        prizes = contest.prizes
+        leaderboard = await compute_leaderboard(session, contest_id, limit=len(prizes))
+        winners = [w for w in leaderboard if w["score"] > 0][: len(prizes)]
 
         res_admins = await session.execute(select(Admin).where(Admin.role == "owner"))
         owners = res_admins.scalars().all()
@@ -37,18 +40,17 @@ async def notify_owner_contest_ended(bot: Bot, contest_id: int, session_factory=
 
         lines = [
             "🏆 <b>Konkurs vaqti tugadi! Natijalar tayyor:</b>\n",
-            f"🥇 1-o'rin sovg'asi: {escape(contest.prize_1)}",
-            f"🥈 2-o'rin sovg'asi: {escape(contest.prize_2)}",
-            f"🥉 3-o'rin sovg'asi: {escape(contest.prize_3)}\n",
-            "📊 <b>Yetakchilar (Top 3):</b>"
+            format_prize_lines(prizes) + "\n",
+            f"📊 <b>Yetakchilar (Top {len(prizes)}):</b>"
         ]
 
         if winners:
-            medals = {1: "🥇", 2: "🥈", 3: "🥉"}
             for w in winners:
-                medal = medals.get(w["rank"], "🎖")
                 tag = f"@{w['username']}" if w["username"] else escape(w["name"])
-                lines.append(f"{medal} {w['rank']}-o'rin: {tag} (ID: <code>{w['user_id']}</code>) — <b>{w['score']}</b> ball")
+                lines.append(
+                    f"{place_badge(w['rank'])} {w['rank']}-o'rin: {tag} (ID: <code>{w['user_id']}</code>) "
+                    f"— <b>{w['score']}</b> ball"
+                )
         else:
             lines.append("<i>Ball to'plagan ishtirokchilar mavjud emas.</i>")
 
