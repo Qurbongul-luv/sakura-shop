@@ -7,6 +7,11 @@ from aiogram.types import (
 )
 from api.config import settings
 
+CONTEST_BUTTON_TEXT = "🎁 Konkursda qatnashish"
+# Users who never re-sent /start still have the old label cached in their keyboard.
+LEGACY_CONTEST_BUTTON_TEXT = "🎁 Konkurs"
+RATING_BUTTON_TEXT = "🏆 Reyting"
+
 
 def get_main_reply_keyboard(webapp_url: str = settings.WEBAPP_URL) -> ReplyKeyboardMarkup:
     """
@@ -21,14 +26,15 @@ def get_main_reply_keyboard(webapp_url: str = settings.WEBAPP_URL) -> ReplyKeybo
                 )
             ],
             [
-                KeyboardButton(text="🎁 Konkurs"),
+                KeyboardButton(text=CONTEST_BUTTON_TEXT),
+                KeyboardButton(text=RATING_BUTTON_TEXT),
+            ],
+            [
                 KeyboardButton(text="🆕 Yangi mahsulotlar"),
-            ],
-            [
                 KeyboardButton(text="⭐ Fikrlar"),
-                KeyboardButton(text="💌 Admin bilan bog'lanish"),
             ],
             [
+                KeyboardButton(text="💌 Admin bilan bog'lanish"),
                 KeyboardButton(text="📢 Kanal"),
             ],
         ],

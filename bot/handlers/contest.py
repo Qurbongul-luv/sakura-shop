@@ -2,6 +2,7 @@ from html import escape
 import logging
 import urllib.parse
 from aiogram import Router, F
+from aiogram.exceptions import TelegramBadRequest
 from aiogram.types import (
     Message,
     CallbackQuery,
@@ -9,28 +10,87 @@ from aiogram.types import (
     InlineKeyboardButton,
 )
 from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
 
-from db.models import User, Contest, ContestReferral
+from db.models import User, Contest, ContestReferral, utcnow
 from db.session import async_session_factory
+from bot.keyboards.reply import CONTEST_BUTTON_TEXT, LEGACY_CONTEST_BUTTON_TEXT, RATING_BUTTON_TEXT
 from bot.services.contest_service import (
     get_active_contest,
     get_user_contest_info,
     confirm_referral_action,
     get_channel_info,
     format_tashkent_datetime,
+    compute_leaderboard,
+    to_tashkent_tz,
 )
 
 logger = logging.getLogger(__name__)
 router = Router(name="contest_participant")
 
+NO_ACTIVE_CONTEST_TEXT = (
+    "🌸 <b>Hozircha faol konkurs yo'q</b> 🎀\n\n"
+    "Tez orada yangi sovg'ali tanlov e'lon qilinadi. Do'konimiz va kanalimizni kuzatib boring! ✨"
+)
+MEDALS = {1: "🥇", 2: "🥈", 3: "🥉"}
+TOP_N = 10
 
-@router.message(F.text == "🎁 Konkurs")
+
+@router.message(F.text.in_({CONTEST_BUTTON_TEXT, LEGACY_CONTEST_BUTTON_TEXT}))
 async def handle_konkurs_button(message: Message):
-    """Handles the '🎁 Konkurs' button from reply keyboard."""
-    await show_user_contest_dashboard(message, message.from_user.id)
+    """Handles the contest button from the reply keyboard."""
+    await show_user_contest_dashboard(message, message.from_user.id, show_prize_photo=True)
 
 
-async def show_user_contest_dashboard(target: Message, user_id: int):
+async def build_leaderboard_view(
+    session: AsyncSession, contest_id: int, viewer_id: int
+) -> tuple[str, InlineKeyboardMarkup]:
+    """Live leaderboard computed from the database at call time, plus the viewer's own place."""
+    contest = (await session.execute(select(Contest).where(Contest.id == contest_id))).scalars().first()
+    board = await compute_leaderboard(session, contest_id, limit=500)
+
+    lines = ["🏆 <b>KONKURS REYTINGI</b> 🌸\n"]
+    if contest is None or contest.status != "active":
+        lines.append("<i>Bu konkurs yakunlangan.</i>\n")
+
+    if board:
+        for entry in board[:TOP_N]:
+            medal = MEDALS.get(entry["rank"], f"<b>{entry['rank']}.</b>")
+            tag = f"@{entry['username']}" if entry["username"] else escape(entry["name"])
+            you = " ⬅️ <i>siz</i>" if entry["user_id"] == viewer_id else ""
+            lines.append(f"{medal} {tag} — <b>{entry['score']}</b> ball{you}")
+        mine = next((entry for entry in board if entry["user_id"] == viewer_id), None)
+        if mine is None:
+            lines.append("\n📍 Siz hali ball to'plamadingiz. Do'stlaringizni taklif qiling!")
+        elif mine["rank"] > TOP_N:
+            lines.append(f"\n📍 Siz: <b>{mine['rank']}-o'rin</b> — {mine['score']} ball")
+    else:
+        lines.append("<i>Hozircha hech kim ball to'plamadi. Birinchi bo'ling! 🌸</i>")
+
+    # Seconds in the stamp make every refresh a real edit, so Telegram never rejects it as unchanged.
+    lines.append(f"\n🕐 Yangilandi: {to_tashkent_tz(utcnow()):%H:%M:%S}")
+
+    markup = InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text="🔄 Yangilash", callback_data=f"rating_refresh:{contest_id}")],
+            [InlineKeyboardButton(text="🎁 Mening natijam va havolam", callback_data=f"my_stats:{contest_id}")],
+        ]
+    )
+    return "\n".join(lines), markup
+
+
+@router.message(F.text == RATING_BUTTON_TEXT)
+async def handle_rating_button(message: Message):
+    async with async_session_factory() as session:
+        active = await get_active_contest(session)
+        if not active:
+            await message.answer(NO_ACTIVE_CONTEST_TEXT)
+            return
+        text, markup = await build_leaderboard_view(session, active.id, message.from_user.id)
+    await message.answer(text, reply_markup=markup)
+
+
+async def show_user_contest_dashboard(target: Message, user_id: int, show_prize_photo: bool = False):
     """Renders the participant's contest dashboard."""
     bot = target.bot
     bot_me = await bot.get_me()
@@ -39,13 +99,15 @@ async def show_user_contest_dashboard(target: Message, user_id: int):
         data = await get_user_contest_info(session, bot_me.username, user_id)
 
         if not data["has_active_contest"]:
-            await target.answer(
-                "🌸 <b>Hozircha faol konkurs yo'q</b> 🎀\n\n"
-                "Tez orada yangi sovg'ali tanlov e'lon qilinadi. Do'konimiz va kanalimizni kuzatib boring! ✨",
-            )
+            await target.answer(NO_ACTIVE_CONTEST_TEXT)
             return
 
         c = data["contest"]
+        if show_prize_photo and c.get("photo_file_id"):
+            try:
+                await target.answer_photo(photo=c["photo_file_id"], caption="🎁 <b>Konkurs sovg'alari</b> 🌸")
+            except Exception as e:
+                logger.warning(f"Could not send contest prize photo: {e}")
         score = data["score"]
         rank = data["rank"]
         next_dist = data["next_rank_score"]
@@ -111,31 +173,19 @@ async def show_user_contest_dashboard(target: Message, user_id: int):
         await target.answer(text, reply_markup=markup)
 
 
-@router.callback_query(F.data.startswith("show_top10:"))
+@router.callback_query(F.data.startswith("show_top10:") | F.data.startswith("rating_refresh:"))
 async def handle_show_top10(call: CallbackQuery):
-    """Shows top 10 leaderboard with medal badges."""
+    """Shows the live leaderboard; the refresh button re-reads the database every time."""
     contest_id = int(call.data.split(":")[1])
     async with async_session_factory() as session:
-        from bot.services.contest_service import compute_leaderboard
-        board = await compute_leaderboard(session, contest_id, limit=10)
-
-        lines = ["🏆 <b>YETAKCHILAR JADVALI (TOP 10)</b> 🌸\n"]
-        if board:
-            medals = {1: "🥇", 2: "🥈", 3: "🥉"}
-            for it in board:
-                medal = medals.get(it["rank"], f"<b>{it['rank']}.</b>")
-                tag = f"@{it['username']}" if it["username"] else escape(it["name"])
-                lines.append(f"{medal} {tag} — <b>{it['score']}</b> ball")
-        else:
-            lines.append("<i>Hozircha hech kim ball to'plamadi. Birinchi bo'ling! 🌸</i>")
-
-        markup = InlineKeyboardMarkup(
-            inline_keyboard=[
-                [InlineKeyboardButton(text="⬅️ Mening natijam", callback_data=f"my_stats:{contest_id}")]
-            ]
-        )
-        await call.message.edit_text("\n".join(lines), reply_markup=markup)
-        await call.answer()
+        text, markup = await build_leaderboard_view(session, contest_id, call.from_user.id)
+    try:
+        await call.message.edit_text(text, reply_markup=markup)
+    except TelegramBadRequest as e:
+        # Two taps within the same second produce identical text; that is not an error for the user.
+        if "message is not modified" not in str(e):
+            raise
+    await call.answer("Reyting yangilandi ✅")
 
 
 @router.callback_query(F.data.startswith("my_stats:"))
