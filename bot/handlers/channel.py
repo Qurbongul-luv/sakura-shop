@@ -13,6 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from api.config import settings
 from bot.loader import bot
+from bot.services.contest_service import get_active_contest
 from db.models import Admin, Setting
 from db.session import async_session_factory
 
@@ -70,6 +71,14 @@ async def link_channel_by_username(session: AsyncSession, tg_bot: Bot, user_id: 
 
     await save_channel_id(session, str(chat.id))
     return True, f"✅ <b>Kanal ulandi:</b> {escape(str(chat.title))} (<code>{chat.id}</code>) 🌸"
+
+
+async def unlink_channel(session: AsyncSession) -> Tuple[bool, str]:
+    # Unlinking mid-contest would make every invitee's ✅ Tasdiqlash fail.
+    if await get_active_contest(session):
+        return False, "⛔ Faol konkurs bor. Avval konkursni tugating yoki bekor qiling, keyin kanalni uzing."
+    await save_channel_id(session, "")
+    return True, "📢 Kanal uzildi. Qayta ulash: ⚙️ Sozlamalar → 🔗 Kanalni ulash."
 
 
 @router.my_chat_member()
@@ -205,3 +214,13 @@ async def process_link_channel(message: Message, state: FSMContext):
     if linked:
         await state.clear()
     await message.answer(reply)
+
+
+@router.callback_query(F.data == "admin_unlink_channel")
+async def handle_unlink_channel(callback: CallbackQuery):
+    async with async_session_factory() as session:
+        if not await is_shop_owner(session, callback.from_user.id):
+            await callback.answer("⛔ Faqat do'kon egasi kanalni uzishi mumkin!", show_alert=True)
+            return
+        _, reply = await unlink_channel(session)
+    await callback.answer(reply, show_alert=True)

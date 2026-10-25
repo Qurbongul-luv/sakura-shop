@@ -137,7 +137,7 @@ router.callback_query.filter(admin_only)
 
 # ==================== MAIN CONTEST MENU FOR ADMIN ====================
 @router.callback_query(F.data == "admin_contest_menu")
-async def handle_admin_contest_menu(call: CallbackQuery, state: FSMContext):
+async def handle_admin_contest_menu(call: CallbackQuery, state: FSMContext, notice: Optional[str] = None):
     await state.clear()
     if not await check_admin(call.from_user.id):
         await call.answer("Admin huquqi talab qilinadi!", show_alert=True)
@@ -193,8 +193,6 @@ async def handle_admin_contest_menu(call: CallbackQuery, state: FSMContext):
                     ]
                 ]
             )
-            await call.message.edit_text(text, reply_markup=markup)
-            await call.answer()
         else:
             text = (
                 "🎁 <b>KONKURS BOSHQARUVI</b> 🌸\n\n"
@@ -208,8 +206,13 @@ async def handle_admin_contest_menu(call: CallbackQuery, state: FSMContext):
                     [InlineKeyboardButton(text="⬅️ Admin menyusiga qaytish", callback_data="admin_main_menu")],
                 ]
             )
-            await call.message.edit_text(text, reply_markup=markup)
-            await call.answer()
+
+    # A callback can be answered only once, so callers pass their alert here instead of answering first.
+    await call.answer(notice, show_alert=bool(notice))
+    if call.message.text:
+        await call.message.edit_text(text, reply_markup=markup)
+    else:  # the launch preview is a photo, which can't be edited into a text menu
+        await call.message.answer(text, reply_markup=markup)
 
 
 # ==================== WIZARD: CREATE CONTEST ====================
@@ -576,8 +579,7 @@ async def launch_contest_confirm(call: CallbackQuery, state: FSMContext):
                 logger.error(f"Failed to post contest to channel {channel_id}: {e}")
 
     await state.clear()
-    await call.answer("Konkurs muvaffaqiyatli boshlandi! 🌸", show_alert=True)
-    await handle_admin_contest_menu(call, state)
+    await handle_admin_contest_menu(call, state, notice="Konkurs muvaffaqiyatli boshlandi! 🌸")
 
 
 # ==================== LIVE LEADERBOARD (TOP 20) ====================
@@ -648,8 +650,7 @@ async def handle_extend_apply(call: CallbackQuery, state: FSMContext):
             logger.info(f"Contest {c.id} extended by {days} days. New ends_at: {c.ends_at}")
 
     await state.clear()
-    await call.answer(f"Konkurs {days} kunga uzaytirildi! 🌸", show_alert=True)
-    await handle_admin_contest_menu(call, state)
+    await handle_admin_contest_menu(call, state, notice=f"Konkurs {days} kunga uzaytirildi! 🌸")
 
 
 # ==================== EDIT PRIZES ====================
@@ -821,7 +822,7 @@ async def handle_cancel_confirm(call: CallbackQuery):
 
 
 @router.callback_query(F.data.startswith("adm_c_cancel_exec:"))
-async def handle_cancel_execute(call: CallbackQuery):
+async def handle_cancel_execute(call: CallbackQuery, state: FSMContext):
     contest_id = int(call.data.split(":")[1])
     async with async_session_factory() as session:
         res = await session.execute(select(Contest).where(Contest.id == contest_id))
@@ -830,8 +831,7 @@ async def handle_cancel_execute(call: CallbackQuery):
             c.status = "cancelled"
             await session.commit()
 
-    await call.answer("Konkurs bekor qilindi.", show_alert=True)
-    await handle_admin_contest_menu(call, None)
+    await handle_admin_contest_menu(call, state, notice="Konkurs bekor qilindi.")
 
 
 # ==================== CHECK A USER ====================

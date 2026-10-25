@@ -124,3 +124,27 @@ async def test_link_refuses_garbage_and_unknown_channel(test_db_session):
         linked, _ = await link_channel_by_username(session, tg_bot, OWNER_1, "@no_such_channel")
         assert not linked
         assert await saved_channel_id(session) == ""
+
+
+# ---- Unlinking the channel ----
+from bot.handlers.channel import save_channel_id, unlink_channel
+from tests.test_contest import seed_active_contest
+
+
+@pytest.mark.asyncio
+async def test_unlink_refused_while_contest_is_active(test_db_session):
+    async with test_db_session() as session:
+        await seed_active_contest(session)
+        await save_channel_id(session, str(CHANNEL_ID))
+        unlinked, _ = await unlink_channel(session)
+        assert not unlinked
+        assert await saved_channel_id(session) == str(CHANNEL_ID)
+
+
+@pytest.mark.asyncio
+async def test_unlink_clears_channel_without_contest(test_db_session):
+    async with test_db_session() as session:
+        await save_channel_id(session, str(CHANNEL_ID))
+        unlinked, _ = await unlink_channel(session)
+        assert unlinked
+        assert await saved_channel_id(session) == ""
