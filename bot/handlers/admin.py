@@ -700,6 +700,7 @@ async def handle_admin_settings_menu(callback: CallbackQuery):
                 InlineKeyboardButton(text="➕ Yangi Admin qo'shish", callback_data="admin_add_new_admin"),
             ],
             [
+                InlineKeyboardButton(text="🔗 Kanalni ulash", callback_data="admin_link_channel"),
                 InlineKeyboardButton(text="📢 Kanalni uzish", callback_data="admin_unlink_channel"),
             ],
             [
