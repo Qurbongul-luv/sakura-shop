@@ -4,6 +4,7 @@ import re
 from datetime import datetime, timezone, timedelta
 from typing import Optional
 from aiogram import Router, F
+from aiogram.exceptions import TelegramBadRequest
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.types import (
@@ -29,6 +30,15 @@ from bot.services.contest_service import (
     final_recheck_contest,
     approve_and_announce_winners,
     get_suspicious_activity,
+    to_tashkent_tz,
+)
+from bot.services.fraud_check import (
+    FLAG_LABELS,
+    LEVEL_EMOJI,
+    LEVEL_GREEN,
+    ReferrerFraudReport,
+    analyze_contest_referrers,
+    is_blank_name,
 )
 
 logger = logging.getLogger(__name__)
@@ -180,6 +190,9 @@ async def handle_admin_contest_menu(call: CallbackQuery, state: FSMContext, noti
                     [
                         InlineKeyboardButton(text="🔎 Foydalanuvchini tekshirish", callback_data=f"adm_c_chk:{active.id}"),
                         InlineKeyboardButton(text="🚨 Shubhali faollik", callback_data=f"adm_c_susp:{active.id}"),
+                    ],
+                    [
+                        InlineKeyboardButton(text="🕵️ Nakrutka tekshiruvi", callback_data=f"adm_c_fraud:{active.id}"),
                     ],
                     [
                         InlineKeyboardButton(text="⏹ Hozir tugatish", callback_data=f"adm_c_end_confirm:{active.id}"),
@@ -938,6 +951,161 @@ async def handle_suspicious_activity(call: CallbackQuery):
         await call.answer()
 
 
+# ==================== FAKE-ACCOUNT (NAKRUTKA) CHECK ====================
+FRAUD_REPORT_TOP_N = 15
+FRAUD_DETAIL_BUTTONS = 8
+FRAUD_DETAIL_INVITEES = 15
+
+
+def fraud_display_tag(name: Optional[str], username: Optional[str], fallback_id: int) -> str:
+    if username:
+        return f"@{escape(username)}"
+    if is_blank_name(name):
+        return f"<i>(ko'rinmas ism)</i> ID {fallback_id}"
+    return escape(str(name))
+
+
+def fraud_flag_summary(report: ReferrerFraudReport) -> str:
+    parts = [f"{label}: {report.flag_counts[flag]}" for flag, label in FLAG_LABELS.items() if report.flag_counts[flag]]
+    return " · ".join(parts) if parts else "belgi yo'q"
+
+
+@router.callback_query(F.data.startswith("adm_c_fraud:"))
+async def handle_fraud_report(call: CallbackQuery):
+    contest_id = int(call.data.split(":")[1])
+    async with async_session_factory() as session:
+        board = await compute_leaderboard(session, contest_id, limit=FRAUD_REPORT_TOP_N)
+        reports = await analyze_contest_referrers(session, contest_id, [b["user_id"] for b in board])
+    by_id = {r.referrer_id: r for r in reports}
+
+    lines = [
+        "🕵️ <b>NAKRUTKA TEKSHIRUVI</b> (Top {})\n".format(FRAUD_REPORT_TOP_N),
+        "<i>Har bir tasdiqlangan do'st tekshiriladi: yangi akkaunt, username yo'q, ko'rinmas ism, "
+        "10 daqiqada 5+ kishi bo'lib kelish. 2 va undan ko'p belgi bo'lsa — shubhali.</i>",
+        "🔴 60%+ shubhali · 🟡 30%+ · 🟢 me'yorda\n",
+        "<i>Bot hech kimni o'zi chiqarmaydi — qarorni siz qilasiz.</i>\n",
+    ]
+    detail_buttons = []
+    for b in board:
+        report = by_id.get(b["user_id"])
+        if report is None:
+            continue
+        tag = fraud_display_tag(b["name"], b["username"], b["user_id"])
+        lines.append(f"{LEVEL_EMOJI[report.level]} <b>{b['rank']}.</b> {tag} — <b>{b['score']}</b> ball")
+        if report.level != LEVEL_GREEN:
+            pct = round(report.suspicious_ratio * 100)
+            lines.append(f"   Shubhali: <b>{report.suspicious}/{report.total}</b> ({pct}%) · {fraud_flag_summary(report)}")
+            if len(detail_buttons) < FRAUD_DETAIL_BUTTONS:
+                detail_buttons.append(
+                    [InlineKeyboardButton(
+                        text=f"{LEVEL_EMOJI[report.level]} {b['rank']}-o'rin tafsiloti",
+                        callback_data=f"adm_c_fraud_u:{contest_id}:{b['user_id']}",
+                    )]
+                )
+    if not board:
+        lines.append("<i>Hozircha ball to'plagan ishtirokchilar yo'q.</i>")
+
+    markup = InlineKeyboardMarkup(
+        inline_keyboard=detail_buttons + [
+            [InlineKeyboardButton(text="🔄 Yangilash", callback_data=f"adm_c_fraud:{contest_id}")],
+            [InlineKeyboardButton(text="⬅️ Konkurs menyusiga qaytish", callback_data="admin_contest_menu")],
+        ]
+    )
+    try:
+        await call.message.edit_text("\n".join(lines), reply_markup=markup)
+    except TelegramBadRequest as e:
+        # Pressing refresh with no new data leaves the text identical, which Telegram rejects.
+        if "message is not modified" not in str(e):
+            raise
+    await call.answer()
+
+
+@router.callback_query(F.data.startswith("adm_c_fraud_u:"))
+async def handle_fraud_detail(call: CallbackQuery):
+    _, contest_id_s, user_id_s = call.data.split(":")
+    contest_id, user_id = int(contest_id_s), int(user_id_s)
+    async with async_session_factory() as session:
+        reports = await analyze_contest_referrers(session, contest_id, [user_id])
+    if not reports:
+        await call.answer("Bu foydalanuvchida tasdiqlangan taklif yo'q.", show_alert=True)
+        return
+    report = reports[0]
+
+    pct = round(report.suspicious_ratio * 100)
+    lines = [
+        f"{LEVEL_EMOJI[report.level]} <b>NAKRUTKA TAFSILOTI</b>\n",
+        f"👤 {fraud_display_tag(report.name, report.username, report.referrer_id)} (ID: <code>{report.referrer_id}</code>)",
+        f"📊 Tasdiqlangan: <b>{report.total}</b> · Shubhali: <b>{report.suspicious}</b> ({pct}%)",
+        f"🔎 {fraud_flag_summary(report)}\n",
+    ]
+    suspicious = [s for s in report.invitees if s.is_suspicious]
+    if suspicious:
+        lines.append(f"<b>Shubhali do'stlar (birinchi {min(len(suspicious), FRAUD_DETAIL_INVITEES)} tasi):</b>")
+        for s in suspicious[:FRAUD_DETAIL_INVITEES]:
+            when = f"{to_tashkent_tz(s.confirmed_at):%d.%m %H:%M}" if s.confirmed_at else "—"
+            reasons = ", ".join(FLAG_LABELS[f] for f in FLAG_LABELS if f in s.flags)
+            lines.append(
+                f"• {fraud_display_tag(s.name, s.username, s.invitee_id)} "
+                f"(<code>{s.invitee_id}</code>) {when}\n   ↳ {reasons}"
+            )
+    else:
+        lines.append("<i>Shubhali do'st topilmadi 🌸</i>")
+
+    markup = InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text="🚫 Diskvalifikatsiya qilish", callback_data=f"adm_c_dq_user:{contest_id}:{user_id}")],
+            [InlineKeyboardButton(text="⬅️ Nakrutka hisobotiga qaytish", callback_data=f"adm_c_fraud:{contest_id}")],
+        ]
+    )
+    await call.message.edit_text("\n".join(lines), reply_markup=markup)
+    await call.answer()
+
+
+async def disqualify_user(contest_id: int, user_id: int, reason: str) -> bool:
+    """Adds the user to the contest's disqualified list. False if they were already on it."""
+    async with async_session_factory() as session:
+        res = await session.execute(select(Contest).where(Contest.id == contest_id))
+        c = res.scalars().first()
+        if not c:
+            return False
+        dq_list = list(c.disqualified_user_ids or [])
+        if user_id in dq_list:
+            return False
+        c.disqualified_user_ids = dq_list + [user_id]
+        await session.commit()
+    logger.info(f"User {user_id} disqualified from contest {contest_id}. Reason: {reason}")
+    return True
+
+
+@router.callback_query(F.data.startswith("adm_c_dq_user:"))
+async def handle_dq_user_confirm(call: CallbackQuery):
+    _, contest_id_s, user_id_s = call.data.split(":")
+    markup = InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text="✅ Ha, chiqarish", callback_data=f"adm_c_dq_yes:{contest_id_s}:{user_id_s}")],
+            [InlineKeyboardButton(text="⬅️ Yo'q, qaytish", callback_data="admin_contest_menu")],
+        ]
+    )
+    await call.message.edit_text(
+        f"🚫 <b>ID <code>{int(user_id_s)}</code> konkursdan chiqarilsinmi?</b>\n\n"
+        "U reytingdan va g'oliblar ro'yxatidan olib tashlanadi.",
+        reply_markup=markup,
+    )
+    await call.answer()
+
+
+@router.callback_query(F.data.startswith("adm_c_dq_yes:"))
+async def handle_dq_user_execute(call: CallbackQuery, state: FSMContext):
+    _, contest_id_s, user_id_s = call.data.split(":")
+    contest_id, user_id = int(contest_id_s), int(user_id_s)
+    added = await disqualify_user(contest_id, user_id, reason=f"admin {call.from_user.id} via button")
+    notice = (
+        f"Foydalanuvchi {user_id} diskvalifikatsiya qilindi 🌸"
+        if added else f"Foydalanuvchi {user_id} allaqachon diskvalifikatsiya qilingan."
+    )
+    await handle_admin_contest_menu(call, state, notice=notice)
+
+
 # ==================== RESULTS APPROVAL HANDLERS ====================
 @router.callback_query(F.data.startswith("contest_approve:"))
 async def handle_results_approve(call: CallbackQuery):
@@ -1028,16 +1196,7 @@ async def process_dq_reason(message: Message, state: FSMContext):
     contest_id = data.get("contest_id")
     dq_user_id = data.get("dq_user_id")
 
-    async with async_session_factory() as session:
-        res = await session.execute(select(Contest).where(Contest.id == contest_id))
-        c = res.scalars().first()
-        if c:
-            dq_list = list(c.disqualified_user_ids or [])
-            if dq_user_id not in dq_list:
-                dq_list.append(dq_user_id)
-                c.disqualified_user_ids = dq_list
-                await session.commit()
-                logger.info(f"User {dq_user_id} disqualified from contest {contest_id}. Reason: {reason}")
+    await disqualify_user(contest_id, dq_user_id, reason)
 
     await state.clear()
     await message.answer(f"Foydalanuvchi {dq_user_id} diskvalifikatsiya qilindi va natijalar ro'yxatidan olib tashlandi! 🌸")
