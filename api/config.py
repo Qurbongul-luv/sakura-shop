@@ -36,6 +36,14 @@ class Settings(BaseSettings):
     HOST: str = Field(default="0.0.0.0")
     PORT: int = Field(default=8000)
     MEDIA_CACHE_DIR: str = Field(default="./media_cache")
+    APIFY_TOKEN: Optional[str] = Field(
+        default=None,
+        description="Apify API token for importing Taobao products by link; import is off when empty",
+    )
+    APIFY_TAOBAO_ACTOR: str = Field(
+        default="apt_marble~taobao-product-detail-scraper",
+        description="Apify actor that returns Taobao product details for item ids",
+    )
 
     model_config = SettingsConfigDict(
         env_file=".env",

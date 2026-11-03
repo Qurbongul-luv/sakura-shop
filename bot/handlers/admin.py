@@ -698,6 +698,9 @@ async def handle_admin_settings_menu(callback: CallbackQuery):
                 InlineKeyboardButton(text="📢 Kanalni uzish", callback_data="admin_unlink_channel"),
             ],
             [
+                InlineKeyboardButton(text="💱 Taobao narx formulasi", callback_data="admin_taobao_pricing"),
+            ],
+            [
                 InlineKeyboardButton(text="⚠️ Barcha ma'lumotlarni tozalash", callback_data="admin_reset_confirm"),
             ],
             [InlineKeyboardButton(text="⬅️ Orqaga", callback_data="admin_menu")],

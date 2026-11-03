@@ -5,7 +5,9 @@ from sqlalchemy import select
 
 from api.config import settings
 from bot.loader import bot, dp
-from bot.handlers import start, channel, admin, inline, orders, contest, admin_contest, channel_member, channel_import
+from bot.handlers import (
+    start, channel, admin, inline, orders, contest, admin_contest, channel_member, channel_import, taobao_import,
+)
 from db.models import Admin
 from db.session import async_session_factory
 
@@ -19,6 +21,7 @@ def setup_routers(dp: Dispatcher):
     dp.include_router(channel_member.router)
     dp.include_router(channel.router)
     dp.include_router(channel_import.router)
+    dp.include_router(taobao_import.router)
     dp.include_router(admin.router)
     dp.include_router(inline.router)
     dp.include_router(orders.router)

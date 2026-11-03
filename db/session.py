@@ -59,6 +59,8 @@ def _add_missing_columns(sync_conn) -> None:
     product_cols = {col["name"] for col in inspector.get_columns("products")}
     if "channel_chat_id" not in product_cols:
         sync_conn.execute(text("ALTER TABLE products ADD COLUMN channel_chat_id BIGINT"))
+    if "taobao_item_id" not in product_cols:
+        sync_conn.execute(text("ALTER TABLE products ADD COLUMN taobao_item_id VARCHAR(32)"))
 
 
 async def init_db() -> None:

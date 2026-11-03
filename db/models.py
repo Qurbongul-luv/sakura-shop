@@ -75,6 +75,8 @@ class Product(Base):
     channel_message_id = Column(Integer, nullable=True)
     # Channel the post lives in; NULL on products posted before this column existed.
     channel_chat_id = Column(BigInteger, nullable=True)
+    # Taobao item the product was imported from; shown to admins only, used to spot repeats.
+    taobao_item_id = Column(String(32), nullable=True, index=True)
 
     category_rel = relationship("Category", backref="products", lazy="joined")
 
