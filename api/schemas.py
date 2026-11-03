@@ -106,9 +106,11 @@ class CartSummaryOut(BaseModel):
 
 # ==================== ORDER SCHEMAS ====================
 class OrderCreate(BaseModel):
+    # Accepted for old clients but ignored: the order is always built from the server-side cart,
+    # with prices from the database and identity from the signed Telegram initData.
     customer_name: Optional[str] = None
     customer_username: Optional[str] = None
-    items: Optional[List[Dict[str, Any]]] = None  # If client provides snapshot, or default to current cart
+    items: Optional[List[Dict[str, Any]]] = None
 
 
 class OrderOut(BaseModel):

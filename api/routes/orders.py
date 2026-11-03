@@ -25,7 +25,9 @@ async def create_order(
     res_cart = await db.execute(select(CartItem).where(CartItem.user_id == user.id))
     cart_items = res_cart.scalars().all()
 
-    if not cart_items and not payload.items:
+    # Orders are built from the server-side cart only. Client-sent items, prices and names are
+    # ignored: trusting them let anyone order at any price or pose as another customer.
+    if not cart_items:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Savat bo'sh, buyurtma berish uchun mahsulot tanlang"
@@ -61,18 +63,18 @@ async def create_order(
                 "weight_grams": prod.weight_grams,
                 "photo": photo,
             })
-    elif payload.items:
-        items_snapshot = payload.items
-        for it in items_snapshot:
-            total += int(it.get("price", 0)) * int(it.get("qty", 1))
-            w = it.get("weight_grams")
-            if w:
-                total_weight += int(w) * int(it.get("qty", 1))
+
+    if not items_snapshot:  # every cart line pointed at a product that no longer exists
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Savatdagi mahsulotlar endi mavjud emas, savatni yangilang"
+        )
 
     estimated_cargo = calculate_cargo(total_weight, cargo_rate)
 
-    customer_name = payload.customer_name or f"{user.first_name} {user.last_name or ''}".strip() or "Mijoz"
-    customer_username = payload.customer_username or user.username
+    # Identity comes from the signed Telegram initData, never from the request body.
+    customer_name = f"{user.first_name} {user.last_name or ''}".strip() or "Mijoz"
+    customer_username = user.username
 
     new_order = Order(
         user_id=user.id,
