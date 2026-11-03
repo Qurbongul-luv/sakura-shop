@@ -94,6 +94,24 @@ export interface Translations {
   statusPending: string;
   statusRevoked: string;
   newContestBtn: string;
+  myOrders: string;
+  myOrdersEmpty: string;
+  myOrdersEmptySubtitle: string;
+  myOrdersLoadError: string;
+  retry: string;
+  orderLabel: string;
+  orderUpdatedAt: string;
+  orderCargoEstimate: string;
+  orderCancelledNote: string;
+  orderAskAdmin: string;
+  viewMyOrders: string;
+  orderStepNew: string;
+  orderStepAccepted: string;
+  orderStepPurchased: string;
+  orderStepShipping: string;
+  orderStepArrived: string;
+  orderStepDelivered: string;
+  orderStepCancelled: string;
 }
 
 export const translations: Record<Language, Translations> = {
@@ -191,6 +209,24 @@ export const translations: Record<Language, Translations> = {
     statusPending: "Kutilmoqda",
     statusRevoked: "Chiqib ketgan",
     newContestBtn: "Yangi konkurs 🎁",
+    myOrders: "Buyurtmalarim 📦",
+    myOrdersEmpty: "Hali buyurtma yo'q",
+    myOrdersEmptySubtitle: "Buyurtma berganingizdan keyin u shu yerda ko'rinadi va qaysi bosqichda ekanini kuzatib borasiz 🌸",
+    myOrdersLoadError: "Buyurtmalarni yuklab bo'lmadi",
+    retry: "Qayta urinish",
+    orderLabel: "Buyurtma",
+    orderUpdatedAt: "Yangilandi",
+    orderCargoEstimate: "Taxminiy kargo",
+    orderCancelledNote: "Bu buyurtma bekor qilingan. Savollar bo'lsa adminga yozing.",
+    orderAskAdmin: "Bu buyurtma bo'yicha yozish 💌",
+    viewMyOrders: "Buyurtmalarim 📦",
+    orderStepNew: "Buyurtma berildi",
+    orderStepAccepted: "Qabul qilindi",
+    orderStepPurchased: "Xitoyda sotib olindi",
+    orderStepShipping: "Yo'lda",
+    orderStepArrived: "Toshkentga keldi",
+    orderStepDelivered: "Yetkazildi",
+    orderStepCancelled: "Bekor qilindi",
   },
   en: {
     shopName: 'Sakura shop',
@@ -286,6 +322,24 @@ export const translations: Record<Language, Translations> = {
     statusPending: 'Pending',
     statusRevoked: 'Left Channel',
     newContestBtn: 'New Contest 🎁',
+    myOrders: "My Orders 📦",
+    myOrdersEmpty: "No orders yet",
+    myOrdersEmptySubtitle: "Once you place an order it will appear here and you can follow every step 🌸",
+    myOrdersLoadError: "Could not load your orders",
+    retry: "Try again",
+    orderLabel: "Order",
+    orderUpdatedAt: "Updated",
+    orderCargoEstimate: "Estimated cargo",
+    orderCancelledNote: "This order was cancelled. Message the admin if you have questions.",
+    orderAskAdmin: "Ask about this order 💌",
+    viewMyOrders: "My Orders 📦",
+    orderStepNew: "Order placed",
+    orderStepAccepted: "Accepted",
+    orderStepPurchased: "Bought in China",
+    orderStepShipping: "On the way",
+    orderStepArrived: "Arrived in Tashkent",
+    orderStepDelivered: "Delivered",
+    orderStepCancelled: "Cancelled",
   },
   ru: {
     shopName: 'Sakura shop',
@@ -381,5 +435,23 @@ export const translations: Record<Language, Translations> = {
     statusPending: 'Ожидает',
     statusRevoked: 'Вышел из канала',
     newContestBtn: 'Новый конкурс 🎁',
+    myOrders: "Мои заказы 📦",
+    myOrdersEmpty: "Заказов пока нет",
+    myOrdersEmptySubtitle: "После оформления заказ появится здесь, и вы сможете следить за каждым этапом 🌸",
+    myOrdersLoadError: "Не удалось загрузить заказы",
+    retry: "Повторить",
+    orderLabel: "Заказ",
+    orderUpdatedAt: "Обновлено",
+    orderCargoEstimate: "Примерный карго",
+    orderCancelledNote: "Этот заказ отменён. Если есть вопросы, напишите администратору.",
+    orderAskAdmin: "Написать по этому заказу 💌",
+    viewMyOrders: "Мои заказы 📦",
+    orderStepNew: "Заказ оформлен",
+    orderStepAccepted: "Принят",
+    orderStepPurchased: "Куплен в Китае",
+    orderStepShipping: "В пути",
+    orderStepArrived: "Прибыл в Ташкент",
+    orderStepDelivered: "Доставлен",
+    orderStepCancelled: "Отменён",
   },
 };

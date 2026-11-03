@@ -1,5 +1,5 @@
 import React from 'react';
-import { Globe, Sparkles, Send, ExternalLink, Shield, Package, Heart } from 'lucide-react';
+import { Globe, Sparkles, Send, ExternalLink, Shield, Package, Heart, ChevronRight } from 'lucide-react';
 import { ShopSettings } from '../types';
 import { Language, Translations } from '../i18n';
 import { openTelegramLink, haptic } from '../utils/telegram';
@@ -13,6 +13,7 @@ interface SettingsPageProps {
   onTogglePetals: () => void;
   reducedMotion: boolean;
   onToggleReducedMotion: () => void;
+  onOpenOrders: () => void;
   t: Translations;
 }
 
@@ -24,6 +25,7 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({
   onTogglePetals,
   reducedMotion,
   onToggleReducedMotion,
+  onOpenOrders,
   t,
 }) => {
   const languages: { code: Language; label: string; flag: string }[] = [
@@ -40,6 +42,21 @@ export const SettingsPage: React.FC<SettingsPageProps> = ({
           <span>{t.settings}</span>
         </h2>
       </div>
+
+      {/* My Orders entry */}
+      <button
+        onClick={() => {
+          haptic.selection();
+          onOpenOrders();
+        }}
+        className="w-full p-4 rounded-3xl bg-gradient-to-r from-sakura-rose to-sakura-darkrose text-white shadow-sakura mb-3 flex items-center justify-between active:scale-[0.98] transition-transform"
+      >
+        <div className="flex items-center gap-2.5">
+          <Package className="w-5 h-5" />
+          <span className="text-sm font-black">{t.myOrders}</span>
+        </div>
+        <ChevronRight className="w-5 h-5" />
+      </button>
 
       {/* Language Selection Card */}
       <div className="p-4 rounded-3xl bg-white/90 dark:bg-sakura-darkcard/90 backdrop-blur-md border border-sakura-pink/20 shadow-sakura-sm mb-3">

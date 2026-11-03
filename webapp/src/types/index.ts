@@ -53,18 +53,40 @@ export interface CartSummary {
   formatted_grand_total: string;
 }
 
+export type OrderStatus =
+  | 'new'
+  | 'accepted'
+  | 'purchased'
+  | 'shipping'
+  | 'arrived'
+  | 'delivered'
+  | 'cancelled';
+
+/** One line of an order, frozen at checkout time by the server. */
+export interface OrderItem {
+  product_id: number;
+  title: string;
+  price: number;
+  size?: string | null;
+  color?: string | null;
+  qty: number;
+  weight_grams?: number | null;
+  photo?: string | null;
+}
+
 export interface Order {
   id: number;
   user_id: number;
   customer_name: string;
   customer_username?: string | null;
-  items_snapshot: any[];
+  items_snapshot: OrderItem[];
   total: number;
   formatted_total: string;
   estimated_cargo: number;
   formatted_cargo: string;
-  status: 'new' | 'accepted' | 'cancelled';
+  status: OrderStatus;
   created_at: string;
+  status_updated_at?: string | null;
 }
 
 export interface Review {

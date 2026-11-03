@@ -2,7 +2,8 @@ import React from 'react';
 import { Home, Heart, ShoppingBag, Star, Settings, ShieldCheck, Gift } from 'lucide-react';
 import { haptic } from '../utils/telegram';
 
-export type TabType = 'home' | 'wishlist' | 'bag' | 'contest' | 'reviews' | 'settings' | 'admin';
+// 'orders' has no bottom tab of its own: it opens from Settings, the order-success screen or ?tab=orders.
+export type TabType = 'home' | 'wishlist' | 'bag' | 'contest' | 'reviews' | 'settings' | 'admin' | 'orders';
 
 interface BottomNavProps {
   currentTab: TabType;

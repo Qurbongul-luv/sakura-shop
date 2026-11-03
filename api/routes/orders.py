@@ -13,6 +13,8 @@ from db.session import get_db
 
 router = APIRouter(prefix="/orders", tags=["orders"])
 
+MAX_LISTED_ORDERS = 50
+
 
 @router.post("", response_model=OrderOut)
 async def create_order(
@@ -127,7 +129,10 @@ async def list_user_orders(
     db: AsyncSession = Depends(get_db),
 ):
     res = await db.execute(
-        select(Order).where(Order.user_id == user.id).order_by(desc(Order.created_at))
+        select(Order)
+        .where(Order.user_id == user.id)
+        .order_by(desc(Order.created_at), desc(Order.id))
+        .limit(MAX_LISTED_ORDERS)
     )
     orders = res.scalars().all()
     return [
@@ -143,6 +148,7 @@ async def list_user_orders(
             formatted_cargo=format_price(o.estimated_cargo),
             status=o.status,
             created_at=o.created_at,
+            status_updated_at=o.status_updated_at,
         )
         for o in orders
     ]

@@ -79,3 +79,24 @@ async def test_price_change_after_adding_to_cart_uses_current_price(client, test
 @pytest.mark.asyncio
 async def test_unsigned_request_is_rejected(client):
     assert (await client.post("/api/orders", json={})).status_code == 401
+
+
+@pytest.mark.asyncio
+async def test_customer_sees_only_own_orders_newest_first(client, test_db_session, headers):
+    async with test_db_session() as session:
+        for uid, status in ((CUSTOMER, "new"), (999, "accepted"), (CUSTOMER, "shipping")):
+            session.add(Order(
+                user_id=uid, customer_name="X", items_snapshot=[], total=1000, estimated_cargo=0, status=status,
+            ))
+        await session.commit()
+    resp = await client.get("/api/orders", headers=headers)
+    assert resp.status_code == 200
+    body = resp.json()
+    assert [o["status"] for o in body] == ["shipping", "new"]
+    assert all(o["user_id"] == CUSTOMER for o in body)
+    assert "status_updated_at" in body[0]
+
+
+@pytest.mark.asyncio
+async def test_order_list_requires_signed_init_data(client):
+    assert (await client.get("/api/orders")).status_code == 401

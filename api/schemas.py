@@ -125,6 +125,7 @@ class OrderOut(BaseModel):
     formatted_cargo: str = ""
     status: str  # new, accepted, purchased, shipping, arrived, delivered, cancelled
     created_at: datetime
+    status_updated_at: Optional[datetime] = None
     model_config = ConfigDict(from_attributes=True)
 
 

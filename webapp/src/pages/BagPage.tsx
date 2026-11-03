@@ -15,6 +15,7 @@ interface BagPageProps {
   onClearCart: () => void;
   onOrderSuccess: (order: Order) => void;
   onContinueShopping: () => void;
+  onViewOrders: () => void;
   t: Translations;
   initData: string;
 }
@@ -27,6 +28,7 @@ export const BagPage: React.FC<BagPageProps> = ({
   onClearCart,
   onOrderSuccess,
   onContinueShopping,
+  onViewOrders,
   t,
   initData,
 }) => {
@@ -167,6 +169,13 @@ export const BagPage: React.FC<BagPageProps> = ({
           >
             <Send className="w-4 h-4" />
             <span>{t.messageAdminButton}</span>
+          </button>
+
+          <button
+            onClick={onViewOrders}
+            className="w-full py-3 px-4 rounded-2xl bg-sakura-blush dark:bg-sakura-darkcardsoft text-sakura-darkrose dark:text-sakura-pink font-bold text-xs flex items-center justify-center gap-1.5 border border-sakura-pink/30 active:scale-95 transition-transform"
+          >
+            <span>{t.viewMyOrders}</span>
           </button>
 
           <button

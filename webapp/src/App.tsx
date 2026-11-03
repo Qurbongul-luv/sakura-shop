@@ -10,6 +10,7 @@ import { ReviewsPage } from './pages/ReviewsPage';
 import { SettingsPage } from './pages/SettingsPage';
 import { AdminPage } from './pages/AdminPage';
 import { ContestPage } from './pages/ContestPage';
+import { OrdersPage } from './pages/OrdersPage';
 import { Language, translations } from './i18n';
 import { getTelegramWebApp, initTelegramApp, haptic } from './utils/telegram';
 
@@ -464,8 +465,18 @@ export const App: React.FC = () => {
                   setCart(null);
                 }}
                 onContinueShopping={() => setCurrentTab('home')}
+                onViewOrders={() => setCurrentTab('orders')}
                 t={t}
                 initData={initData}
+              />
+            )}
+
+            {currentTab === 'orders' && (
+              <OrdersPage
+                initData={initData}
+                settings={shopSettings}
+                onExplore={() => setCurrentTab('home')}
+                t={t}
               />
             )}
 
@@ -487,6 +498,7 @@ export const App: React.FC = () => {
                 onTogglePetals={() => setPetalsEnabled(!petalsEnabled)}
                 reducedMotion={reducedMotion}
                 onToggleReducedMotion={() => setReducedMotion(!reducedMotion)}
+                onOpenOrders={() => setCurrentTab('orders')}
                 t={t}
               />
             )}
