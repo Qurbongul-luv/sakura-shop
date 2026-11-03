@@ -110,6 +110,8 @@ async def post_product_to_channel(product: Product) -> Dict[str, Any]:
             p_obj = p_res.scalars().first()
             if p_obj and sent_msg_id:
                 p_obj.channel_message_id = sent_msg_id
+                # Lets a later forward of this post be recognised instead of imported twice.
+                p_obj.channel_chat_id = int(channel_id) if str(channel_id).lstrip("-").isdigit() else None
                 await session.commit()
 
             return {"success": True, "channel_message_id": sent_msg_id}

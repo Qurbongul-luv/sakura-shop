@@ -73,6 +73,8 @@ class Product(Base):
     views = Column(Integer, default=0, nullable=False)
     created_at = Column(DateTime(timezone=True), default=utcnow)
     channel_message_id = Column(Integer, nullable=True)
+    # Channel the post lives in; NULL on products posted before this column existed.
+    channel_chat_id = Column(BigInteger, nullable=True)
 
     category_rel = relationship("Category", backref="products", lazy="joined")
 

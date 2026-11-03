@@ -53,6 +53,12 @@ def _add_missing_columns(sync_conn) -> None:
     existing = {col["name"] for col in inspect(sync_conn).get_columns("contests")}
     if "extra_prizes" not in existing:
         sync_conn.execute(text("ALTER TABLE contests ADD COLUMN extra_prizes JSON"))
+    inspector = inspect(sync_conn)
+    if not inspector.has_table("products"):
+        return
+    product_cols = {col["name"] for col in inspector.get_columns("products")}
+    if "channel_chat_id" not in product_cols:
+        sync_conn.execute(text("ALTER TABLE products ADD COLUMN channel_chat_id BIGINT"))
 
 
 async def init_db() -> None:

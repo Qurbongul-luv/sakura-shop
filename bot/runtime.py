@@ -8,7 +8,10 @@ from aiogram.methods import GetUpdates
 from aiogram.exceptions import TelegramConflictError
 
 logger = logging.getLogger(__name__)
-ALLOWED_UPDATES = ["message", "callback_query", "inline_query", "my_chat_member", "chat_member"]
+ALLOWED_UPDATES = [
+    "message", "callback_query", "inline_query", "my_chat_member", "chat_member",
+    "channel_post", "edited_channel_post",
+]
 
 
 class WebhookConfiguredError(RuntimeError):

@@ -1,7 +1,8 @@
 import math
-import re
 from html import escape
 from typing import Optional, List, Dict, Any
+
+from api.services.post_parser import parse_product_post
 
 
 def format_price(price: int) -> str:
@@ -71,44 +72,15 @@ def parse_channel_post(text: str) -> Dict[str, Any]:
     Magic shortcut parser: when admin forwards a channel post,
     extracts hashtag category, price, and details.
     """
-    result: Dict[str, Any] = {
-        "category": "jempir",
-        "price": 0,
-        "title": "",
-        "sizes": [],
-        "colors": [],
-        "weight_grams": None,
+    parsed = parse_product_post(text)
+    return {
+        "category": parsed.category or "jempir",
+        "price": parsed.price,
+        "title": parsed.title or "",
+        "sizes": list(parsed.sizes),
+        "colors": list(parsed.colors),
+        "weight_grams": parsed.weight_grams,
     }
-
-    if not text:
-        return result
-
-    # 1. Extract hashtag (e.g. #scarf, #jempir, #wig, #sumka)
-    match_tag = re.search(r"#([a-zA-Z0-9_]+)", text)
-    if match_tag:
-        result["category"] = match_tag.group(1).lower()
-
-    # 2. Extract price (e.g. "Narxi: 45.000 so'm" or "45 000 so'm" or "45.000" or "99000")
-    match_price = re.search(r"(?:Narxi:?\s*)?(\d{1,3}(?:[.\s]\d{3})*|\d+)\s*(?:so['’`]?m)?", text, re.IGNORECASE)
-    if match_price:
-        raw_price = match_price.group(1).replace(".", "").replace(" ", "")
-        try:
-            val = int(raw_price)
-            if val >= 1000:  # Reasonable minimum price in so'm
-                result["price"] = val
-        except ValueError:
-            pass
-
-    # 3. Extract title if present
-    lines = [l.strip() for l in text.split("\n") if l.strip()]
-    for line in lines:
-        if line.startswith("#"):
-            cleaned = re.sub(r"^#[a-zA-Z0-9_]+\s*", "", line).strip()
-            if cleaned:
-                result["title"] = cleaned
-            break
-
-    return result
 
 
 def build_order_summary(

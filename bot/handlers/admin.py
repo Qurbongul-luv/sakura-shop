@@ -10,6 +10,7 @@ from datetime import datetime, timezone
 from aiogram.filters import Command, CommandObject, StateFilter
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
+from aiogram.enums import MessageOriginType
 from aiogram.types import (
     Message,
     CallbackQuery,
@@ -24,8 +25,10 @@ from aiogram.types import (
 from sqlalchemy import select, func, desc, delete
 
 from api.config import settings
-from api.services.formatters import format_price, calculate_cargo, parse_channel_post, build_channel_caption
+from api.services.formatters import format_price, calculate_cargo, build_channel_caption
+from api.services.post_parser import parse_product_post
 from bot.keyboards.reply import get_admin_main_keyboard, get_main_reply_keyboard
+from bot.services.channel_import import AlbumCollector, IncomingPost, import_post, result_markup, result_text
 from bot.services.channel_post import post_product_to_channel
 from bot.services.ownership import claim_ownership, create_owner_invite
 from db.models import Admin, Product, Category, Review, Order, User, Setting
@@ -157,16 +160,23 @@ async def handle_cancel_wizard(message: Message, state: FSMContext):
 
 
 # ==================== MAGIC SHORTCUT: FORWARDED CHANNEL POST ====================
-@router.message(StateFilter(None), F.forward_from_chat)
+# Old channel posts can't be read by a bot, so admins forward them (several at once is fine);
+# forwarded albums keep their media_group_id and are grouped like live channel posts.
+forwarded_albums = AlbumCollector()
+
+
+@router.message(StateFilter(None), F.forward_origin.type == MessageOriginType.CHANNEL)
 async def handle_forwarded_post(message: Message, state: FSMContext):
     user_id = message.from_user.id
     if not await is_user_admin(user_id):
         return
 
     text = message.caption or message.text or ""
+    parsed = parse_product_post(text)
+    lower = text.lower()
 
-    # Check if this is a review screenshot or product
-    if message.photo and ("#отзыв" in text.lower() or "fikr" in text.lower() or "rahmat" in text.lower()):
+    # A priced post is a product even if it says "rahmat"; reviews are tagged or have no price.
+    if message.photo and (parsed.is_review or (not parsed.is_product and ("fikr" in lower or "rahmat" in lower))):
         # Treat as review
         photo_id = message.photo[-1].file_id
         async with async_session_factory() as session:
@@ -181,44 +191,28 @@ async def handle_forwarded_post(message: Message, state: FSMContext):
         await message.answer("⭐ <b>Mijoz fikri (#отзыв) avtomatik saqlandi va tasdiqlandi!</b> 🌸")
         return
 
-    # Parse product channel post
-    parsed = parse_channel_post(text)
-    photos = []
-    if message.photo:
-        photos.append(message.photo[-1].file_id)
+    origin = message.forward_origin
+    bot = message.bot
+    reply_chat_id = message.chat.id
 
-    await state.update_data(
-        photos=photos,
-        title=parsed["title"] or f"{parsed['category'].capitalize()} 🌸",
-        price=parsed["price"] or 0,
-        category=parsed["category"],
-        sizes=[],
-        colors=[],
-        weight_grams=None,
-        description=text,
-    )
+    async def reply_with_result(post: IncomingPost) -> None:
+        async with async_session_factory() as session:
+            result = await import_post(session, post)
+        await bot.send_message(
+            chat_id=reply_chat_id,
+            text=result_text(result, len(post.photos)),
+            reply_markup=result_markup(result),
+        )
 
-    summary = (
-        "✨ <b>Sehrli import: Kanaldagi post ma'lumotlari aniqlandi!</b> 🌸\n\n"
-        f"🏷️ <b>Kategoriya:</b> #{parsed['category']}\n"
-        f"🌸 <b>Nomi:</b> {parsed['title'] or parsed['category']}\n"
-        f"💰 <b>Narxi:</b> {format_price(parsed['price'])}\n"
-        f"📸 <b>Rasmlar:</b> {len(photos)} ta\n\n"
-        "Ushbu mahsulotni saqlaymizmi yoki ma'lumotlarni to'ldirasizmi?"
+    await forwarded_albums.add(
+        receiving_chat_id=reply_chat_id,
+        source_chat_id=origin.chat.id,
+        message_id=origin.message_id,
+        media_group_id=message.media_group_id,
+        photo_id=message.photo[-1].file_id if message.photo else None,
+        caption=text,
+        handler=reply_with_result,
     )
-
-    markup = InlineKeyboardMarkup(
-        inline_keyboard=[
-            [
-                InlineKeyboardButton(text="✅ To'g'ri, saqlash", callback_data="wizard_save_fast"),
-                InlineKeyboardButton(text="✏️ O'zgartirish", callback_data="admin_add_product"),
-            ],
-            [
-                InlineKeyboardButton(text="❌ Bekor", callback_data="admin_cancel"),
-            ]
-        ]
-    )
-    await message.answer(summary, reply_markup=markup)
 
 
 # ==================== ADD PRODUCT WIZARD (FSM) ====================
