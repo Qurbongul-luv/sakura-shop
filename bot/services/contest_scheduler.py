@@ -16,6 +16,8 @@ from bot.services.contest_service import (
     place_badge,
 )
 
+from bot.services.review_requests import send_review_requests
+
 logger = logging.getLogger(__name__)
 
 
@@ -118,6 +120,10 @@ async def run_contest_scheduler(bot: Optional[Bot]):
                     reminders_sent = await send_pending_reminders(session, bot)
                     if reminders_sent > 0:
                         logger.info(f"Sent {reminders_sent} pending referral reminders.")
+                async with async_session_factory() as session:
+                    reviews_asked = await send_review_requests(session, bot)
+                    if reviews_asked > 0:
+                        logger.info(f"Asked {reviews_asked} customers for a review.")
         except asyncio.CancelledError:
             logger.info("Contest scheduler stopped.")
             break

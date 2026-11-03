@@ -7,6 +7,7 @@ from api.auth import get_current_user, TelegramUser
 from api.schemas import OrderCreate, OrderOut
 from api.services.formatters import format_price, calculate_cargo
 from bot.services.order_notifier import notify_new_order
+from bot.services.profit import order_cost
 from db.models import Order, CartItem, Product, Setting
 from db.session import get_db
 
@@ -81,6 +82,7 @@ async def create_order(
         total=total,
         estimated_cargo=estimated_cargo,
         status="new",
+        cost_total=await order_cost(db, items_snapshot),
     )
     db.add(new_order)
     await db.flush()

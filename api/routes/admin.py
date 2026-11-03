@@ -28,6 +28,8 @@ from api.services.formatters import build_channel_caption, format_price
 from bot.loader import bot
 from bot.services.broadcaster import run_broadcast
 from bot.services.channel_post import post_product_to_channel
+from bot.services.order_status import RESULT_NOT_ALLOWED, RESULT_NOT_FOUND, change_status_and_notify
+from bot.services.order_status import label as status_label
 from db.models import Product, Category, Order, Review, User, Admin, Wishlist, Setting
 from db.session import get_db
 
@@ -259,25 +261,15 @@ async def admin_update_order_status(
     admin: TelegramUser = Depends(require_admin),
     db: AsyncSession = Depends(get_db),
 ):
-    res = await db.execute(select(Order).where(Order.id == order_id))
-    order = res.scalars().first()
-    if not order:
+    change = await change_status_and_notify(db, bot, order_id, payload.status)
+    if change.result == RESULT_NOT_FOUND:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Buyurtma topilmadi")
-
-    order.status = payload.status
-    await db.commit()
-    await db.refresh(order)
-
-    # Notify customer via Telegram if status changed
-    if bot and order.user_id:
-        status_text = "qabul qilindi ✅" if payload.status == "accepted" else "bekor qilindi ❌"
-        try:
-            await bot.send_message(
-                chat_id=order.user_id,
-                text=f"🌸 <b>Buyurtmangiz (#{order.id}) holati o'zgardi:</b>\nHolat: <b>{status_text}</b>\n\nSavollaringiz bo'lsa @fkhrdnvvvva ga yozishingiz mumkin 💌",
-            )
-        except Exception as e:
-            logger.warning(f"Could not notify user {order.user_id} of order status: {e}")
+    if change.result == RESULT_NOT_ALLOWED:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"Bu holatga o'tib bo'lmaydi (hozir: {status_label(change.order.status)})",
+        )
+    order = change.order
 
     return OrderOut(
         id=order.id,

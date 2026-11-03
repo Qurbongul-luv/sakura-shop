@@ -32,6 +32,16 @@ import { formatPrice, getMediaUrl } from '../utils/format';
 import { haptic } from '../utils/telegram';
 import { Translations } from '../i18n';
 
+const ORDER_STATUS_LABELS: Record<string, string> = {
+  new: 'Yangi',
+  accepted: 'Qabul qilindi',
+  purchased: 'Sotib olindi',
+  shipping: "Yo'lda",
+  arrived: 'Toshkentda',
+  delivered: 'Yetkazildi',
+  cancelled: 'Bekor',
+};
+
 const PLACE_BADGES = ['🥇', '🥈', '🥉'];
 const placeBadge = (index: number): string => PLACE_BADGES[index] ?? '🏅';
 
@@ -1048,14 +1058,14 @@ export const AdminPage: React.FC<AdminPageProps> = ({
                   </div>
                   <span
                     className={`px-2.5 py-0.5 rounded-full text-[10px] font-black uppercase ${
-                      o.status === 'accepted'
-                        ? 'bg-emerald-100 text-emerald-700'
-                        : o.status === 'cancelled'
+                      o.status === 'cancelled'
                         ? 'bg-rose-100 text-rose-700'
-                        : 'bg-amber-100 text-amber-700 animate-pulse'
+                        : o.status === 'new'
+                        ? 'bg-amber-100 text-amber-700 animate-pulse'
+                        : 'bg-emerald-100 text-emerald-700'
                     }`}
                   >
-                    {o.status}
+                    {ORDER_STATUS_LABELS[o.status] ?? o.status}
                   </span>
                 </div>
 

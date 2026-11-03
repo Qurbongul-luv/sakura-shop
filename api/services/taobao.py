@@ -176,6 +176,13 @@ def calculate_price(price_yuan: float, rule: PriceRule) -> int:
     return int(math.ceil(round(raw, 6) / step) * step)
 
 
+def calculate_cost(price_yuan: float, rule: PriceRule) -> Optional[int]:
+    """Purchase cost in so'm (yuan × rate, no markup), for the owner's profit report."""
+    if not rule.is_configured or price_yuan <= 0:
+        return None
+    return int(math.ceil(round(price_yuan * rule.yuan_rate, 6)))
+
+
 SETTING_RATE = "taobao_yuan_rate"
 SETTING_PERCENT = "taobao_markup_percent"
 SETTING_FIXED = "taobao_markup_fixed"

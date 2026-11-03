@@ -121,13 +121,13 @@ class OrderOut(BaseModel):
     formatted_total: str = ""
     estimated_cargo: int
     formatted_cargo: str = ""
-    status: str  # new, accepted, cancelled
+    status: str  # new, accepted, purchased, shipping, arrived, delivered, cancelled
     created_at: datetime
     model_config = ConfigDict(from_attributes=True)
 
 
 class OrderStatusUpdate(BaseModel):
-    status: str = Field(..., pattern="^(new|accepted|cancelled)$")
+    status: str = Field(..., pattern="^(accepted|purchased|shipping|arrived|delivered|cancelled)$")
 
 
 # ==================== WISHLIST SCHEMAS ====================

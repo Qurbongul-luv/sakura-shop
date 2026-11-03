@@ -77,6 +77,8 @@ class Product(Base):
     channel_chat_id = Column(BigInteger, nullable=True)
     # Taobao item the product was imported from; shown to admins only, used to spot repeats.
     taobao_item_id = Column(String(32), nullable=True, index=True)
+    # Owner-only purchase cost in so'm (Taobao price × rate, or typed in); never sent to customers.
+    cost_som = Column(Integer, nullable=True)
 
     category_rel = relationship("Category", backref="products", lazy="joined")
 
@@ -116,8 +118,15 @@ class Order(Base):
     items_snapshot = Column(JSON, nullable=False)  # [{product_id, title, price, size, color, qty, photo}]
     total = Column(Integer, nullable=False)
     estimated_cargo = Column(Integer, nullable=False, default=0)
-    status = Column(String(50), default="new", nullable=False)  # new, accepted, cancelled
+    # new → accepted → purchased → shipping → arrived → delivered, or cancelled
+    status = Column(String(50), default="new", nullable=False)
     created_at = Column(DateTime(timezone=True), default=utcnow)
+    status_updated_at = Column(DateTime(timezone=True), nullable=True)
+    delivered_at = Column(DateTime(timezone=True), nullable=True)
+    review_requested_at = Column(DateTime(timezone=True), nullable=True)
+    reviewed_at = Column(DateTime(timezone=True), nullable=True)
+    # Owner-only: purchase cost of all items in so'm; NULL when any item's cost is unknown.
+    cost_total = Column(Integer, nullable=True)
 
 
 class Review(Base):

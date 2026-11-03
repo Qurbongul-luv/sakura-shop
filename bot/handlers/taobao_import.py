@@ -27,6 +27,7 @@ from api.services.taobao import (
     PriceRule,
     TaobaoItem,
     TaobaoLink,
+    calculate_cost,
     calculate_price,
     find_taobao_link,
     parse_rule_input,
@@ -193,7 +194,8 @@ async def start_import(message: Message, state: FSMContext, link: TaobaoLink) ->
     await state.set_state(TaobaoImport.title)
     await state.update_data(
         item_id=item.item_id, title_cn=item.title, price_yuan=item.price_yuan,
-        price=calculate_price(item.price_yuan, rule), photos=photos, colors=[], sizes=[],
+        price=calculate_price(item.price_yuan, rule), cost_som=calculate_cost(item.price_yuan, rule),
+        photos=photos, colors=[], sizes=[],
     )
     await status.edit_text(
         f"✅ <b>Taobao'dan olindi</b> ({len(photos)} ta rasm)\n\n"
@@ -401,6 +403,7 @@ async def save_product(data: Dict[str, Any]) -> Product:
             in_stock=True,
             is_new=True,
             taobao_item_id=data.get("item_id"),
+            cost_som=data.get("cost_som"),
         )
         session.add(product)
         await session.commit()

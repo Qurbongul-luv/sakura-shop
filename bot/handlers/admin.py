@@ -31,6 +31,7 @@ from bot.keyboards.reply import get_admin_main_keyboard, get_main_reply_keyboard
 from bot.services.channel_import import AlbumCollector, IncomingPost, import_post, result_markup, result_text
 from bot.services.channel_post import post_product_to_channel
 from bot.services.ownership import claim_ownership, create_owner_invite
+from bot.services.profit import is_owner
 from db.models import Admin, Product, Category, Review, Order, User, Setting
 from db.session import async_session_factory
 
@@ -603,6 +604,13 @@ async def handle_manage_single_product(callback: CallbackQuery):
             ]
         ]
     )
+    async with async_session_factory() as session:
+        owner = await is_owner(session, callback.from_user.id)
+    if owner:  # cost is owners-only
+        cost_label = format_price(p.cost_som) if p.cost_som is not None else "kiritilmagan"
+        markup.inline_keyboard.insert(
+            0, [InlineKeyboardButton(text=f"💴 Tannarx: {cost_label}", callback_data=f"own_cost:{p.id}")]
+        )
 
     await callback.message.edit_text(text, reply_markup=markup)
     await callback.answer()
@@ -654,13 +662,15 @@ async def handle_admin_stats(callback: CallbackQuery):
         "Batafsil grafiklar va monitoring Mini App 👑 Admin bo'limida mavjud!"
     )
 
-    markup = InlineKeyboardMarkup(
-        inline_keyboard=[
-            [InlineKeyboardButton(text="👑 Mini App'da to'liq statistika", web_app=WebAppInfo(url=f"{settings.WEBAPP_URL}?tab=admin"))],
-            [InlineKeyboardButton(text="⬅️ Orqaga", callback_data="admin_menu")]
-        ]
-    )
-    await callback.message.edit_text(text, reply_markup=markup)
+    rows = [
+        [InlineKeyboardButton(text="👑 Mini App'da to'liq statistika", web_app=WebAppInfo(url=f"{settings.WEBAPP_URL}?tab=admin"))],
+    ]
+    async with async_session_factory() as session:
+        owner = await is_owner(session, callback.from_user.id)
+    if owner:  # profit is owners-only; plain admins never see the button
+        rows.append([InlineKeyboardButton(text="💰 Foyda hisoboti", callback_data="own_profit:30")])
+    rows.append([InlineKeyboardButton(text="⬅️ Orqaga", callback_data="admin_menu")])
+    await callback.message.edit_text(text, reply_markup=InlineKeyboardMarkup(inline_keyboard=rows))
     await callback.answer()
 
 

@@ -49,8 +49,8 @@ async def notify_new_order(
         admin_markup = InlineKeyboardMarkup(
             inline_keyboard=[
                 [
-                    InlineKeyboardButton(text="✅ Qabul qilindi", callback_data=f"order_accept_{order_id}"),
-                    InlineKeyboardButton(text="❌ Bekor", callback_data=f"order_cancel_{order_id}"),
+                    InlineKeyboardButton(text="✅ Qabul qilish", callback_data=f"ord_st:{order_id}:accepted"),
+                    InlineKeyboardButton(text="❌ Bekor", callback_data=f"ord_st:{order_id}:cancelled"),
                 ],
                 [
                     InlineKeyboardButton(

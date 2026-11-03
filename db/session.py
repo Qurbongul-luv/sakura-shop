@@ -54,13 +54,28 @@ def _add_missing_columns(sync_conn) -> None:
     if "extra_prizes" not in existing:
         sync_conn.execute(text("ALTER TABLE contests ADD COLUMN extra_prizes JSON"))
     inspector = inspect(sync_conn)
-    if not inspector.has_table("products"):
+    timestamp = "TIMESTAMP WITH TIME ZONE" if sync_conn.dialect.name == "postgresql" else "DATETIME"
+    _add_columns(sync_conn, inspector, "products", {
+        "channel_chat_id": "BIGINT",
+        "taobao_item_id": "VARCHAR(32)",
+        "cost_som": "INTEGER",
+    })
+    _add_columns(sync_conn, inspector, "orders", {
+        "status_updated_at": timestamp,
+        "delivered_at": timestamp,
+        "review_requested_at": timestamp,
+        "reviewed_at": timestamp,
+        "cost_total": "INTEGER",
+    })
+
+
+def _add_columns(sync_conn, inspector, table: str, columns: dict) -> None:
+    if not inspector.has_table(table):
         return
-    product_cols = {col["name"] for col in inspector.get_columns("products")}
-    if "channel_chat_id" not in product_cols:
-        sync_conn.execute(text("ALTER TABLE products ADD COLUMN channel_chat_id BIGINT"))
-    if "taobao_item_id" not in product_cols:
-        sync_conn.execute(text("ALTER TABLE products ADD COLUMN taobao_item_id VARCHAR(32)"))
+    existing = {col["name"] for col in inspector.get_columns(table)}
+    for name, sql_type in columns.items():
+        if name not in existing:
+            sync_conn.execute(text(f"ALTER TABLE {table} ADD COLUMN {name} {sql_type}"))
 
 
 async def init_db() -> None:
